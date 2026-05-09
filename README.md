@@ -30,8 +30,8 @@ Stack 0 € — Aider + Groq Kimi K2 + Gemini Flash + Cloudflare Workers + GH Ac
 |---|---|
 | **Sesión -1** — CLI prereqs (`wrangler`, `gh`) | ✅ |
 | **Sesión 0** — repo + 3 secrets + KV namespace | ✅ 2026-05-09 |
-| **Sem 1** — policy engine + 4 playbooks YAML + Worker detector | ⏳ siguiente |
-| **Sem 2** — Aider integration + session report estructurado | — |
+| **Sem 1** — policy engine + 4 playbooks YAML + Worker detector + workflow loop | ✅ 2026-05-09 |
+| **Sem 2** — Aider integration + session report estructurado | ⏳ siguiente |
 | **Sem 3** — classifier Gemini Flash con top-2 margin ≥ 0.15 | — |
 | **Sem 4** — router con health scoring (PR merge rate + failure stage) | — |
 
@@ -45,28 +45,77 @@ El diseño completo está en **`druiz07/arbolado-app`** (privado, requiere acces
 - `docs/auto-maintenance/policy-engine-spec.md` — AST validator de `package.json`, 5 funciones + tests obligatorios
 - `docs/auto-maintenance/playbooks/bump-devdep-cve.yaml` — playbook canónico (con 6 ajustes finos integrados)
 
-## Estructura actual
+## Estructura actual (post-Sem 1)
 
 ```
 .
-├── .env.example          # nombres exactos de variables (alineados con secrets de GH Actions)
-├── README.md             # este archivo
-├── LICENSE               # MIT
-├── .gitignore            # Node defaults
-└── cloudflare/
-    └── NOTES.md          # KV namespace ID + schema + wrangler.toml template
+├── .env.example                       # variables (alineadas con secrets de GH Actions)
+├── README.md                          # este archivo
+├── LICENSE                            # MIT
+├── .gitignore                         # Node defaults
+├── .github/workflows/
+│   └── loop.yml                       # cron orchestrator (Sem 1: tests + observe-signals)
+├── cloudflare/
+│   ├── NOTES.md                       # KV namespace ID + schema + wrangler.toml template
+│   └── worker/                        # ✅ Sem 1
+│       ├── wrangler.toml              # cron */30 + KV binding STATE
+│       ├── package.json               # zod + wrangler + types
+│       ├── tsconfig.json              # strict + workers-types + node
+│       ├── src/
+│       │   ├── worker.ts              # entry: scheduled() + fetch() de dev
+│       │   ├── signal-schema.ts       # zod schema + generateSignalHash (SHA-256)
+│       │   ├── dependabot.ts          # cliente API Dependabot Alerts
+│       │   └── normalize.ts           # alert → Signal canónico
+│       └── test/
+│           └── normalize.test.ts      # 6/6 pasan
+├── runner/                            # ✅ Sem 1
+│   ├── package.json                   # node 20 + semver
+│   ├── README.md
+│   └── policy-engine/
+│       ├── index.js                   # re-exports
+│       ├── diff.js                    # parsePackageJsonDiff (AST, no regex)
+│       ├── semver-rules.js            # validateSemverChange (semver real)
+│       ├── operations.js              # validateOperations (forbidden > allowed)
+│       ├── equivalence.js             # astEquivalent + areDiffsCompatible (double-run)
+│       ├── lockfile.js                # validateLockfileChange
+│       ├── validate.js                # entry point validatePackageJsonChange
+│       ├── aider-helpers.js           # resolveSafeVersion + enforceMaxDiff + parseDiffStat
+│       └── *.test.js                  # 70/70 pasan
+└── docs/auto-maintenance/
+    ├── playbooks/                     # ✅ Sem 1
+    │   ├── README.md
+    │   ├── bump-devdep-cve.yaml       # mirror del canónico (autoritativo en arbolado-app)
+    │   ├── fix-tests-minor-version-bump.yaml  # derivado
+    │   ├── rollback-on-build-failure.yaml     # derivado, critical: true
+    │   └── lint-prettier-autofix.yaml         # derivado
+    └── session-reports/               # creado en Sem 2 cuando arranque el dataset JSON
 ```
 
-## A añadir en Sem 1
+## Cómo correr los tests en local
+
+```powershell
+# Policy engine (Node 20, runtime real del loop)
+cd runner
+npm install
+npm test
+# ✔ 70 tests, 0 fail (~220 ms)
+
+# Worker detector (TypeScript)
+cd ../cloudflare/worker
+npm install
+npm run typecheck
+npm test
+# ✔ 6 tests, 0 fail (~300 ms)
+```
+
+## A añadir en Sem 2
 
 ```
-cloudflare/worker/        # detector Worker (TypeScript), normaliza Dependabot+npm audit a signal-schema
-runner/                   # scripts Node: classifier, policy engine, router, Aider invoker
-.github/workflows/
-└── loop.yml              # GH Actions cron orchestrator
-docs/auto-maintenance/
-├── playbooks/            # YAMLs derivados del canónico (fix-tests-minor-version-bump, rollback-on-build-failure, lint-prettier-autofix)
-└── session-reports/      # JSON dataset de cada ejecución del loop (10 campos obligatorios)
+runner/aider/                          # invoker headless con flags estrictos
+runner/session-report/                 # builder del JSON con 10 campos obligatorios
+runner/playbook-loader/                # loader YAML + validador de schema
+docs/auto-maintenance/session-reports/<YYYY-MM-DD>/<playbook>-<hash>.json
+.github/workflows/loop.yml             # añadir job apply-playbooks (Aider) tras observe-signals
 ```
 
 ## Desarrollo local

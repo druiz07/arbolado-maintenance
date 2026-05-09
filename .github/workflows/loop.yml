@@ -1,0 +1,109 @@
+# Loop autónomo de mantenimiento — Sem 1: dry-observation.
+#
+# Sem 1 alcance:
+#   - Tests del runner (policy engine) y del Worker (Dependabot normalizer) corren en CI.
+#   - Listado de signals en Cloudflare KV (vía wrangler) → artifact para inspección humana.
+#   - NO hay executor: Aider llega en Sem 2, classifier en Sem 3, router en Sem 4.
+#
+# Una vez consolidado Sem 2, este workflow gana un job `act-on-signals` que:
+#   - clasifica cada signal (Gemini Flash con top-2 margin ≥ 0.15),
+#   - aplica el playbook correspondiente con Aider,
+#   - abre PR en arbolado-app con label auto:dry-run,
+#   - escribe session-report JSON commit en este repo.
+
+name: maintenance-loop
+
+on:
+  schedule:
+    # Cada hora, alineado con la cadencia de Sem 1 (validar contratos, no acción todavía).
+    # Sube/baja en Sem 2-4 según volumen real de signals.
+    - cron: '0 * * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write   # para abrir issues si signal contract drift
+
+concurrency:
+  group: maintenance-loop
+  cancel-in-progress: false
+
+jobs:
+  test-runner:
+    name: Tests del runner (policy engine)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: runner
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: runner/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  test-worker:
+    name: Tests del Worker (Dependabot normalizer)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloudflare/worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: cloudflare/worker/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  observe-signals:
+    name: Listar signals en Cloudflare KV
+    runs-on: ubuntu-latest
+    needs: [test-runner, test-worker]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install wrangler
+        run: npm install -g wrangler@latest
+      - name: List signals
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT_ID: e4ccfa519c1e0fb94221ca6583220545
+          KV_NAMESPACE_ID: 212fe2e1b8874298ad44a9a906375033
+        run: |
+          mkdir -p signals-snapshot
+          wrangler kv key list \
+            --namespace-id "$KV_NAMESPACE_ID" \
+            --prefix "signal:" \
+            > signals-snapshot/keys.json || echo "[]" > signals-snapshot/keys.json
+          echo "Signals encontradas:"
+          jq 'length' signals-snapshot/keys.json || true
+          # Para cada key, fetch del valor — limitado a 50 para no agotar
+          # cuota; si Sem 2-3 detectan que excede regularmente, ampliar.
+          jq -r '.[].name' signals-snapshot/keys.json | head -50 | while read -r key; do
+            safe="${key//[:\/]/_}"
+            wrangler kv key get "$key" \
+              --namespace-id "$KV_NAMESPACE_ID" \
+              > "signals-snapshot/${safe}.json" 2>/dev/null || true
+          done
+      - name: Upload signals as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: signals-${{ github.run_id }}
+          path: signals-snapshot/
+          retention-days: 30
+
+  # JOBS DIFERIDOS — placeholders para Sem 2-4. NO se ejecutan por ahora,
+  # los descomentamos cuando los entregables correspondientes estén listos.
+  #
+  # classify-signals:    # Sem 3 — Gemini Flash con top-2 margin
+  # apply-playbooks:     # Sem 2 — Aider invoker + policy validation + PR
+  # write-session-report: # Sem 2 — JSON commit en docs/auto-maintenance/session-reports/
