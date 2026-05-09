@@ -79,21 +79,9 @@ copy .env.example .env
 
 `.env` ya está cubierto por `.gitignore`. Nunca commitearlo.
 
-## Secrets en GitHub Actions
+## Configuración
 
-Configurados en Sesión 0:
-
-```
-GH_PAT_ARBOLADO_APP   # PAT scoped a arbolado-app (contents:write, pull_requests:write, actions:read)
-GROQ_API_KEY          # Groq Cloud — Kimi K2 (executor primario)
-GEMINI_API_KEY        # Google AI Studio — Gemini 2.5 Flash (classifier + fallback)
-```
-
-Verificar con:
-
-```powershell
-gh secret list --repo druiz07/arbolado-maintenance
-```
+Las variables de entorno necesarias (nombres canónicos) están en [`.env.example`](./.env.example). Para desarrollo local, copia a `.env` y rellena valores. Para CI, los mismos nombres están provisionados como secrets del repo (gestión privada del mantenedor).
 
 ## Licencia
 
