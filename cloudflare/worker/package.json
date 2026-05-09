@@ -1,0 +1,24 @@
+{
+  "name": "arbolado-maintenance-detector",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cloudflare Worker — detector cron que normaliza Dependabot alerts a signal-schema y los escribe en KV.",
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "tail": "wrangler tail",
+    "test": "node --test --test-reporter=spec --import tsx test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260101.0",
+    "@types/node": "^20.14.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0",
+    "wrangler": "^3.86.0"
+  }
+}
