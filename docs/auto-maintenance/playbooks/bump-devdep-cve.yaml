@@ -1,0 +1,164 @@
+# MIRROR del canónico — autoritativo en
+# https://github.com/druiz07/arbolado-app/blob/main/docs/auto-maintenance/playbooks/bump-devdep-cve.yaml
+#
+# Esta copia existe para que el loader del runner pueda cargar todos los playbooks
+# desde un único directorio sin checkout cruzado del repo privado. Si el canónico
+# cambia, este mirror se sincroniza en el mismo PR (validación: hash idéntico salvo
+# este header).
+#
+# Última sincronización: 2026-05-09 (Sem 1, primera copia tras Sesión 0).
+
+id: bump-devdep-cve
+version: 1
+description: >
+  Aplica parche automático a CVEs detectados en devDependencies cuando existe
+  versión segura compatible sin romper semver rules.
+
+trigger:
+  type: dependabot_alert | sentry | custom_worker
+  signal_schema:
+    type: object
+    required:
+      - source
+      - dependency
+      - severity
+      - current_version
+      - dependency_type
+    properties:
+      source:
+        type: string
+        enum: [dependabot, snyk, worker]
+      dependency:
+        type: string
+      current_version:
+        type: string
+      vulnerable_versions:
+        type: string
+      patched_versions:
+        type: string
+      severity:
+        type: string
+        enum: [low, moderate, high, critical]
+      is_transitive:
+        type: boolean
+      dependency_type:
+        type: string
+        enum: [dev, runtime]
+      path:
+        type: string
+      advisory_id:
+        type: string
+      context:
+        type: object
+        properties:
+          parent_dependency:
+            type: string
+            nullable: true
+          fix_available:
+            type: boolean
+
+classifier:
+  model: gemini-2.5-flash
+  temperature: 0.1
+  top_p: 0.9
+  margin_threshold: 0.15
+  prompt: |
+    Eres un clasificador de señales para mantenimiento automático.
+    Tu tarea es mapear una señal a un playbook.
+    Responde SOLO en JSON:
+    {
+      "playbook_id": "...",
+      "confidence": 0.0-1.0
+    }
+    Reglas:
+    - Usa "bump-devdep-cve" SOLO si:
+      - dependency_type == "dev"
+      - Existe patched_versions
+    - Si dependency_type == "runtime" → NO seleccionar este playbook
+    - Si no hay parche disponible → confidence bajo
+
+constraints:
+  allowed_paths:
+    - package.json
+    - package-lock.json
+  forbidden_paths:
+    - electron-app/src/main/**
+    - electron-app/src/preload/**
+  allowed_operations:
+    - bump_version
+  forbidden_operations:
+    - remove_dependency
+    - change_scripts
+    - modify_engines
+  require_dev_dependency: true
+  version_rules:
+    allowed_range_changes:
+      - patch
+      - minor
+    forbid_major_bumps: true
+    forbid_range_widening: true
+  max_diff_lines: 200
+  required_checks:
+    - npm test
+    - npm run build
+  retry_limit: 3
+  cooldown_minutes: 30
+  classify_confidence_min: 0.85
+  critical: false
+
+execution:
+  model_strategy:
+    primary: groq/kimi-k2
+    fallback: google/gemini-2.5-flash
+    backup: openrouter/free
+  pre_aider_steps:
+    - resolveSafeVersion:
+        input: { dep: signal.dependency, range: signal.patched_versions }
+        on_null: edge_case.no_patch_available
+    - dedupCheck:
+        key: "signal_seen:{{signal_hash}}"
+        on_hit: skip_duplicate_signal
+  aider:
+    args:
+      - --no-stream
+      - --yes
+      - --map-tokens 0
+      - --edit-format diff
+    temperature: 0.1
+    prompt: |
+      Objetivo: corregir una vulnerabilidad CVE en devDependencies.
+      Versión segura ya resuelta: {{safe_version_selected}} (NO inventar otra).
+      SOLO modificar package.json y package-lock.json.
+      NO tocar scripts, engines ni otras secciones.
+      NO eliminar dependencias.
+      Mantener compatibilidad semver (sin major bump).
+      {{#if signal.is_transitive}}
+      Dependencia transitiva → actualizar parent: {{signal.context.parent_dependency}}
+      NO toques la dep transitiva directamente.
+      {{/if}}
+      Señal: {{signal_json}}
+      Devuelve SOLO el diff.
+  post_aider_steps:
+    - enforceMaxDiff:
+        max: constraints.max_diff_lines
+        on_exceed: block_diff_size_exceeded
+
+postconditions:
+  require_tests_pass: true
+  require_build_pass: true
+  on_failure:
+    action: retry_or_issue
+
+edge_cases:
+  no_patch_available:
+    action: open_issue
+    reason: "no_safe_version"
+  transitive_dependency:
+    action: attempt_indirect_fix
+    note: "bump parent dependency si aplica"
+  requires_major_bump:
+    action: open_issue
+    reason: "major_bump_required"
+  duplicate_signal:
+    action: skip
+    reason: "signal_hash_already_processed_within_24h"

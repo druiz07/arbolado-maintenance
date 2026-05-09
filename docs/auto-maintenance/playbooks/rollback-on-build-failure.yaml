@@ -1,0 +1,143 @@
+# Derivado del canónico bump-devdep-cve.yaml.
+#
+# Caso de uso: tras un merge en main, CI (build o tests) falla. Hacemos rollback
+# automático del merge para restaurar el árbol verde — operación NO involucra
+# Aider (no hay edición de código creativa, solo `git revert`).
+#
+# Diferencias clave vs. canónico:
+# - critical: TRUE → double-run en post-G.5
+# - cooldown 60 + max_rollbacks_per_24h 2 (anti-loop estricto)
+# - allowed_operations: revert (no bump_version ni add)
+# - executor NO usa Aider — usa script git revert directo
+# - signal source: GH Actions completed run con conclusion=failure en main
+
+id: rollback-on-build-failure
+version: 1
+description: >
+  Rollback automático cuando CI falla en main tras un merge.
+  No edita código — ejecuta `git revert <sha>` y abre PR.
+
+trigger:
+  type: github_actions_completion
+  signal_schema:
+    type: object
+    required:
+      - source
+      - run_id
+      - branch
+      - head_sha
+      - conclusion
+      - parent_sha
+    properties:
+      source:
+        type: string
+        enum: [github_actions]
+      run_id: { type: string }
+      branch: { type: string }
+      head_sha: { type: string }
+      parent_sha: { type: string }
+      conclusion:
+        type: string
+        enum: [failure]
+      failed_jobs:
+        type: array
+        items: { type: string }
+      previous_run_conclusion:
+        type: string
+        enum: [success, failure, none]
+
+classifier:
+  model: gemini-2.5-flash
+  temperature: 0.1
+  top_p: 0.9
+  margin_threshold: 0.15
+  prompt: |
+    Mapea la señal a un playbook. Responde SOLO en JSON:
+    {
+      "playbook_id": "...",
+      "confidence": 0.0-1.0
+    }
+    Reglas para "rollback-on-build-failure":
+    - branch == "main"
+    - conclusion == "failure"
+    - previous_run_conclusion ∈ {"success", "none"} (no hacer rollback en cadena)
+    - SI failed_jobs incluye solo lint/format → confidence bajo (lint-prettier-autofix)
+    - SI failed_jobs incluye test/build → confidence alto
+
+constraints:
+  allowed_paths: []        # NO se editan archivos — solo git revert
+  forbidden_paths: []      # irrelevante
+  allowed_operations:
+    - revert_merge
+  forbidden_operations:
+    - bump_version
+    - add_dependency
+    - remove_dependency
+    - change_scripts
+    - modify_engines
+  max_diff_lines: 10000    # un revert puede ser grande, irrelevante aquí
+  required_checks:
+    - npm test
+    - npm run build
+  retry_limit: 1           # un solo intento — si falla, escalar a humano
+  cooldown_minutes: 60
+  max_rollbacks_per_24h: 2 # anti-loop crítico
+  classify_confidence_min: 0.90
+  critical: true           # double-run en post-G.5 con criterio de equivalencia
+
+execution:
+  model_strategy:
+    primary: none          # NO usa LLM — script puro
+    fallback: none
+    backup: none
+  pre_aider_steps:
+    - dedupCheck:
+        key: "signal_seen:{{signal_hash}}"
+        on_hit: skip_duplicate_signal
+    # Anti-loop crítico — KV state persiste contadores
+    - cooldownCheck:
+        key: "last_rollback:{{playbook_id}}"
+        min_minutes: 60
+        on_hit: edge_case.cooldown_active
+    - rollbackQuotaCheck:
+        key: "rollback_count_24h:{{playbook_id}}"
+        max: 2
+        on_exceed: edge_case.quota_exceeded
+  # No hay sección `aider` — el executor es un script git puro
+  git_revert:
+    target_sha: signal.head_sha
+    parent_sha: signal.parent_sha
+    branch_name: "auto/rollback-{{signal.head_sha}}"
+    pr_title: "[AUTO-DRY-RUN][rollback] revert {{signal.head_sha}} (CI failure on main)"
+    pr_body: |
+      CI failed on main after merging {{signal.head_sha}}.
+      Failed jobs: {{signal.failed_jobs}}
+      Previous run: {{signal.previous_run_conclusion}}
+
+      This is an automatic rollback. Review and merge if appropriate.
+  post_aider_steps:
+    # Tras revert, registrar timestamp + incrementar contador 24h
+    - kvWrite:
+        key: "last_rollback:{{playbook_id}}"
+        value: "{{now_iso}}"
+    - kvIncr:
+        key: "rollback_count_24h:{{playbook_id}}"
+        ttl_seconds: 86400
+
+postconditions:
+  require_tests_pass: true   # tras el revert, CI debe volver a pasar
+  require_build_pass: true
+  on_failure:
+    action: open_issue       # si tras revert sigue rojo, escalar
+    reason: "rollback_did_not_restore_green"
+
+edge_cases:
+  cooldown_active:
+    action: skip
+    reason: "another_rollback_within_60_min"
+  quota_exceeded:
+    action: open_issue
+    reason: "more_than_2_rollbacks_in_24h_human_review_required"
+  parent_sha_missing:
+    action: open_issue
+    reason: "cannot_determine_parent_for_revert"

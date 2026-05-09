@@ -1,0 +1,152 @@
+# Derivado del canónico bump-devdep-cve.yaml.
+#
+# Caso de uso: drift de formato — alguien commiteó código sin pasar prettier/eslint
+# y CI falla con errores de estilo. Aplicamos `prettier --write` + `eslint --fix`
+# sobre los archivos afectados sin tocar lógica.
+#
+# Diferencias clave vs. canónico:
+# - critical: false (formato no afecta runtime)
+# - cooldown 15 (drift puede repetirse, no tan grave)
+# - executor NO usa Aider — usa scripts npm directos (prettier, eslint --fix)
+# - allowed_operations: format_only (no bump, no add, no remove)
+
+id: lint-prettier-autofix
+version: 1
+description: >
+  Repara errores de formato/lint detectados por CI ejecutando
+  `prettier --write` + `eslint --fix` sobre los archivos afectados.
+
+trigger:
+  type: ci_failure_lint | github_actions_log
+  signal_schema:
+    type: object
+    required:
+      - source
+      - failed_files
+      - lint_tool
+      - branch
+    properties:
+      source:
+        type: string
+        enum: [github_actions, jenkins]
+      failed_files:
+        type: array
+        items: { type: string }
+      lint_tool:
+        type: string
+        enum: [prettier, eslint, both]
+      branch: { type: string }
+      error_categories:
+        type: array
+        items: { type: string }
+        # Solo se actúa si SOLO hay categorías formales — si hay errores
+        # semánticos (no-unused-vars, prefer-const con efecto, etc.) → skip.
+
+classifier:
+  model: gemini-2.5-flash
+  temperature: 0.1
+  top_p: 0.9
+  margin_threshold: 0.15
+  prompt: |
+    Mapea la señal a un playbook. Responde SOLO en JSON:
+    {
+      "playbook_id": "...",
+      "confidence": 0.0-1.0
+    }
+    Reglas para "lint-prettier-autofix":
+    - lint_tool ∈ {prettier, eslint, both}
+    - error_categories debe contener SOLO formato (indent, semi, quotes, trailing-spaces, etc.)
+    - SI error_categories incluye errores semánticos (no-unused-vars, no-undef, etc.)
+      → confidence bajo (esos no se autofixan sin contexto)
+    - SI failed_files > 50 → confidence bajo (probable revert necesario, no autofix)
+
+constraints:
+  allowed_paths:
+    - electron-app/src/**
+    - cloudflare-worker/src/**
+    - docs/**/*.md
+  forbidden_paths:
+    - electron-app/src/main/**
+    - electron-app/src/preload/**
+    - "**/*.lock"
+    - package-lock.json
+  allowed_operations:
+    - format_only
+  forbidden_operations:
+    - bump_version
+    - add_dependency
+    - remove_dependency
+    - change_scripts
+    - modify_engines
+  max_diff_lines: 500
+  required_checks:
+    - npm run lint
+    - npm test
+    - npm run build
+  retry_limit: 1
+  cooldown_minutes: 15
+  classify_confidence_min: 0.85
+  critical: false
+
+execution:
+  model_strategy:
+    primary: none      # NO usa LLM — scripts npm directos
+    fallback: none
+    backup: none
+  pre_aider_steps:
+    - dedupCheck:
+        key: "signal_seen:{{signal_hash}}"
+        on_hit: skip_duplicate_signal
+    - sliceInput:
+        files_from: signal.failed_files
+        on_empty: edge_case.no_failed_files
+    # Bloqueo si la señal incluye errores semánticos
+    - rejectIfSemanticErrors:
+        categories_blocklist:
+          - no-unused-vars
+          - no-undef
+          - no-unreachable
+          - prefer-const
+          - no-var
+        on_match: edge_case.semantic_errors_present
+  # No hay sección `aider` — formatters deterministas
+  format_steps:
+    - run: "npx prettier --write {{slice.files}}"
+    - run: "npx eslint --fix {{slice.files}}"
+    - branch_name: "auto/lint-fix-{{signal_hash}}"
+    - pr_title: "[AUTO-DRY-RUN][lint] prettier+eslint --fix"
+    - pr_body: |
+        Auto-format applied to:
+        {{signal.failed_files}}
+
+        Tool: {{signal.lint_tool}}
+        No semantic changes — only formatting/linting fixes.
+  post_aider_steps:
+    - enforceMaxDiff:
+        max: constraints.max_diff_lines
+        on_exceed: block_diff_size_exceeded
+    # Verificación AST: el código antes y después debe ser semánticamente idéntico
+    # (formato no debería cambiar la AST salvo whitespace/comments).
+    - astSemanticEquivalenceCheck:
+        on_diff: edge_case.semantic_drift_after_format
+
+postconditions:
+  require_tests_pass: true
+  require_build_pass: true
+  on_failure:
+    action: open_issue
+    reason: "lint_fix_introduced_test_or_build_failure"
+
+edge_cases:
+  no_failed_files:
+    action: skip
+    reason: "signal_failed_files_empty"
+  semantic_errors_present:
+    action: open_issue
+    reason: "lint_errors_include_semantic_categories_human_review_required"
+  semantic_drift_after_format:
+    action: open_issue
+    reason: "ast_changed_after_format_unexpected"
+  too_many_files:
+    action: open_issue
+    reason: "more_than_50_files_failing_lint_revert_recommended"
