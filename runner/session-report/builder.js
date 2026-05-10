@@ -6,7 +6,11 @@
 
 import { generateSignalHash } from './signal-hash.js';
 
-function deriveFailureStage({ classifierResult, policyResult, invokerResult, ciResult, prResult }) {
+function deriveFailureStage({ playbook, classifierResult, policyResult, invokerResult, ciResult, prResult }) {
+  // playbook == null implica que load-playbook falló (el classifier sugirió un
+  // playbook que no existe o el YAML no parseó). Eso es un fallo a nivel
+  // classifier (lo que vino antes en el pipeline) — gana sobre todo lo demás.
+  if (playbook === null || playbook === undefined) return 'classifier';
   if (classifierResult === null || classifierResult === undefined) return 'classifier';
   if (policyResult && policyResult.valid === false) return 'policy';
   if (invokerResult && invokerResult.errorClass !== null) return 'aider';
@@ -45,18 +49,27 @@ export function buildReport({
   classifierResult,
   nowIso,
 }) {
-  if (!playbook?.meta?.id || typeof playbook.meta.id !== 'string') {
-    throw new Error('buildReport: playbook.meta.id required (string)');
+  // playbook === null es válido: significa que load-playbook falló y construimos
+  // un report con failure_stage='classifier' usando el hint del classifier.
+  // Si playbook NO es null pero le falta meta.id, sigue siendo un error de contrato.
+  if (playbook !== null && playbook !== undefined) {
+    if (!playbook?.meta?.id || typeof playbook.meta.id !== 'string') {
+      throw new Error('buildReport: playbook.meta.id required (string)');
+    }
   }
 
   const signal_hash = generateSignalHash(signal);
 
-  const failure_stage = deriveFailureStage({ classifierResult, policyResult, invokerResult, ciResult, prResult });
+  const failure_stage = deriveFailureStage({ playbook, classifierResult, policyResult, invokerResult, ciResult, prResult });
   const model_used = deriveModelUsed({ invokerResult });
   const diff_size = deriveDiffSize({ policyResult });
   const tests_passed = deriveTestsPassed({ ciResult });
 
-  const playbook_id = classifierResult?.playbookId ?? playbook.meta.id;
+  // Si playbook es null, fallback al hint del classifier; si tampoco hay
+  // classifier, 'unknown' (decisión #4 del plan: todo signal genera report).
+  const playbook_id = (playbook && playbook.meta && playbook.meta.id)
+    ? (classifierResult?.playbookId ?? playbook.meta.id)
+    : (classifierResult?.playbookId ?? 'unknown');
 
   const policy_violations = (policyResult && Array.isArray(policyResult.violations))
     ? [...policyResult.violations]

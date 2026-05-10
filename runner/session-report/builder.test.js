@@ -303,6 +303,58 @@ describe('buildReport — orden de precedencia del failure_stage', () => {
   });
 });
 
+describe('buildReport with null playbook (load-playbook failure)', () => {
+  it('playbook=null + classifierResult con hint → playbook_id del hint, failure_stage=classifier', () => {
+    const r = callBuild({
+      playbook: null,
+      classifierResult: { playbookId: 'bump-devdep-cve', margin: null },
+    });
+    assert.equal(r.playbook_id, 'bump-devdep-cve');
+    assert.equal(r.failure_stage, 'classifier');
+    assert.equal(r.model_used, 'none');
+    assert.equal(r.diff_size, 0);
+    assert.equal(r.tests_passed, false);
+    assert.deepEqual(r.policy_violations, []);
+    assert.equal(validateReport(r).ok, true);
+  });
+
+  it('playbook=null + classifierResult=null → playbook_id="unknown", failure_stage=classifier', () => {
+    const r = callBuild({
+      playbook: null,
+      classifierResult: null,
+    });
+    assert.equal(r.playbook_id, 'unknown');
+    assert.equal(r.failure_stage, 'classifier');
+    assert.equal(r.model_used, 'none');
+    assert.equal(r.diff_size, 0);
+    assert.equal(r.tests_passed, false);
+    assert.deepEqual(r.policy_violations, []);
+    assert.equal(validateReport(r).ok, true);
+  });
+
+  it('playbook=null + policyResult.valid=false → failure_stage=classifier (regression: classifier order beats policy)', () => {
+    const r = callBuild({
+      playbook: null,
+      classifierResult: { playbookId: 'bump-devdep-cve', margin: null },
+      policyResult: {
+        valid: false,
+        violations: [{ type: 'forbidden_operation' }],
+        ops: { dependencyChanges: [], scriptChanges: [], enginesChanged: false, rawDiffLines: 99 },
+      },
+      invokerResult: {
+        exitCode: 1, durationMs: 100, diff: '', stdout: '', stderr: '',
+        filesEdited: [], modelUsed: 'x', errorClass: 'process',
+      },
+      ciResult: { testsOk: false, buildOk: false },
+    });
+    assert.equal(r.failure_stage, 'classifier');
+    assert.equal(r.playbook_id, 'bump-devdep-cve');
+    // policy_violations sigue surfaceado por trazabilidad aunque failure_stage sea classifier
+    assert.equal(r.policy_violations.length, 1);
+    assert.equal(validateReport(r).ok, true);
+  });
+});
+
 describe('buildReport — defaults y bordes', () => {
   it('rechaza si playbook.meta.id falta', () => {
     assert.throws(

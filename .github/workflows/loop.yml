@@ -314,7 +314,7 @@ jobs:
       # El report registra el failure_stage según los outcomes acumulados.
       - name: Build and write session report
         id: write-report
-        if: always() && steps.load-playbook.outcome == 'success'
+        if: always() && steps.load-signal.outcome == 'success'
         working-directory: runner
         run: |
           node scripts/cli/build-and-write-report.mjs .. \

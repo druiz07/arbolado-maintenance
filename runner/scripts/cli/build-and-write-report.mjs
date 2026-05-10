@@ -37,10 +37,11 @@ const invoker = await readJsonOr(join(ws, 'invoker.json'), null);
 const policy = await readJsonOr(join(ws, 'policy.json'), null);
 const maxDiff = await readJsonOr(join(ws, 'max-diff.json'), null);
 
-if (!signal || !playbook) {
-  console.error('build-and-write-report: signal o playbook ausentes — abortando');
+if (!signal) {
+  console.error('build-and-write-report: signal ausente — abortando (sin signal no hay path)');
   process.exit(1);
 }
+// playbook ausente OK: el builder produce un report con failure_stage='classifier' usando el classifier hint
 
 // Si enforceMaxDiff falló, añadir su violation al policy.violations
 let policyResult = policy;
