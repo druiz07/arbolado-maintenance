@@ -1,0 +1,22 @@
+{
+  "source": "worker",
+  "dependency": "eslint",
+  "current_version": "^8.54.0",
+  "vulnerable_versions": "<8.56.0",
+  "patched_versions": ">=8.56.0",
+  "severity": "high",
+  "is_transitive": false,
+  "dependency_type": "dev",
+  "path": "package.json",
+  "advisory_id": "GHSA-fixture-parcial3",
+  "detected_at": "2026-05-10T12:00:00Z",
+  "signal_version": 1,
+  "context": {
+    "package_manager": "npm",
+    "lockfile_present": true,
+    "direct_dependency": true,
+    "parent_dependency": null,
+    "dependency_chain": ["eslint"],
+    "fix_available": true
+  }
+}

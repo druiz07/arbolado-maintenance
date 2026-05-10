@@ -118,9 +118,89 @@ jobs:
           path: signals-snapshot/
           retention-days: 30
 
-  # JOBS DIFERIDOS — placeholders para Sem 2-4. NO se ejecutan por ahora,
-  # los descomentamos cuando los entregables correspondientes estén listos.
-  #
-  # classify-signals:    # Sem 3 — Gemini Flash con top-2 margin
-  # apply-playbooks:     # Sem 2 — Aider invoker + policy validation + PR
-  # write-session-report: # Sem 2 — JSON commit en docs/auto-maintenance/session-reports/
+  # apply-playbooks: Sem 2 parcial 3 — pipeline completo
+  #   loader → policy → invoker → CI → report → PR auto:dry-run
+  # En parcial 3 se ejecuta SOLO con workflow_dispatch (smoke manual).
+  # Sem 3 lo activará en cron tras integrar el classifier real (Gemini Flash).
+  # Spec: docs/superpowers/plans/2026-05-10-g5-sem2-parcial3-session-report-loop-yml.md
+  apply-playbooks:
+    name: Aplicar playbook (smoke parcial 3)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    needs: [test-runner]
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      ARBOLADO_APP_REPO: druiz07/arbolado-app
+      AIDER_MODEL: groq/llama-3.3-70b-versatile
+      # TODO Sem 4 (router): resolver alias del playbook (groq/kimi-k2 → modelo
+      # disponible en la cuenta) listando GET /v1/models. Spec: arranque-plan.md
+      # §"Hallazgos del smoke real 2026-05-10".
+    steps:
+      # ---------- 1. Infra ----------
+      - name: Checkout runner repo
+        id: checkout-runner
+        uses: actions/checkout@v5
+
+      - name: Checkout arbolado-app
+        id: checkout-app
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.ARBOLADO_APP_REPO }}
+          token: ${{ secrets.GH_PAT_ARBOLADO_APP }}
+          path: app
+          fetch-depth: 0
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: runner/package-lock.json
+
+      - name: Install Aider 0.86.2
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install aider-chat==0.86.2
+          aider --version
+
+      - name: npm ci (runner)
+        working-directory: runner
+        run: npm ci
+
+      - name: Prepare workspace dirs
+        run: mkdir -p workspace/intermediate workspace/state
+
+      # ---------- 2. Pipeline state machine ----------
+      # Cada step escribe workspace/state/<step>.outcome con success|failure y
+      # workspace/intermediate/<step>.json con su output. write-report compone
+      # los argumentos finales leyendo esos archivos.
+
+      - name: Load signal (parcial 3 — desde fixture; Sem 3 = KV de Cloudflare)
+        id: load-signal
+        run: |
+          cp runner/fixtures/sample-signal.json workspace/intermediate/signal.json
+          echo success > workspace/state/load-signal.outcome
+        continue-on-error: true
+
+      - name: Classify signal → playbook (parcial 3 — hardcoded; Sem 3 = Gemini Flash)
+        id: classify
+        run: |
+          echo '{"playbookId":"bump-devdep-cve","margin":null}' > workspace/intermediate/classifier.json
+          echo success > workspace/state/classify.outcome
+        continue-on-error: true
+
+      - name: Load playbook (loader)
+        id: load-playbook
+        if: steps.classify.outcome == 'success'
+        working-directory: runner
+        run: |
+          PB_ID=$(jq -r '.playbookId' ../workspace/intermediate/classifier.json)
+          node --input-type=module -e "
+            import { loadPlaybook } from './playbook-loader/index.js';
+            const pb = await loadPlaybook('../docs/auto-maintenance/playbooks/${PB_ID}.yaml');
+            console.log(JSON.stringify(pb));
+          " > ../workspace/intermediate/playbook.json
+          echo success > ../workspace/state/load-playbook.outcome
+        continue-on-error: true
