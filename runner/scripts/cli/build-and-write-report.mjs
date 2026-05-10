@@ -8,22 +8,22 @@
 // Exit 0 incluso si el report indica fallo — el report es la respuesta.
 
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { existsSync } from 'node:fs';
 import { buildAndWriteReport } from '../../session-report/index.js';
 
-const repoRoot = process.argv[2];
-if (!repoRoot) {
+const repoRootArg = process.argv[2];
+if (!repoRootArg) {
   console.error('usage: build-and-write-report.mjs <repoRoot>');
   process.exit(2);
 }
 
-// Los paths internos (workspace/intermediate, workspace/state) son relativos al
-// repoRoot. El step que invoca este CLI tiene working-directory: runner, así que
-// sin chdir(repoRoot) los lookups irían a runner/workspace/* — que no existe.
-process.chdir(repoRoot);
-
-const ws = 'workspace/intermediate';
+// El step invoca este CLI con working-directory: runner. Resolvemos repoRoot a
+// ruta absoluta una sola vez para que (a) los reads de workspace/* encuentren
+// los JSON intermedios y (b) el writer (que hace join(repoRoot, 'docs/...'))
+// escriba dentro del repo y no en su parent.
+const repoRoot = resolve(repoRootArg);
+const ws = join(repoRoot, 'workspace/intermediate');
 
 async function readJsonOr(path, fallback) {
   if (!existsSync(path)) return fallback;
@@ -62,8 +62,9 @@ if (maxDiff && maxDiff.valid === false) {
 }
 
 // CI result derivado de los archivos de outcome
+const stateDir = join(repoRoot, 'workspace/state');
 async function readOutcome(name) {
-  const p = `workspace/state/${name}.outcome`;
+  const p = join(stateDir, `${name}.outcome`);
   if (!existsSync(p)) return null;
   return (await readFile(p, 'utf8')).trim() === 'success';
 }
