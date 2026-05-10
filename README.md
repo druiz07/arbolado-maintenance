@@ -28,12 +28,14 @@ Stack 0 € — Aider + Groq Kimi K2 + Gemini Flash + Cloudflare Workers + GH Ac
 
 | Fase | Estado |
 |---|---|
-| **Sesión -1** — CLI prereqs (`wrangler`, `gh`) | ✅ |
-| **Sesión 0** — repo + 3 secrets + KV namespace | ✅ 2026-05-09 |
+| **Sesión -1** — CLI prereqs (`wrangler`, `gh`, `aider`) | ✅ |
+| **Sesión 0** — repo + 4 secrets + KV namespace | ✅ 2026-05-09 |
 | **Sem 1** — policy engine + 4 playbooks YAML + Worker detector + workflow loop | ✅ 2026-05-09 |
-| **Sem 2** — Aider integration + session report estructurado | ⏳ siguiente |
-| **Sem 3** — classifier Gemini Flash con top-2 margin ≥ 0.15 | — |
-| **Sem 4** — router con health scoring (PR merge rate + failure stage) | — |
+| **Sem 2** — playbook loader + Aider invoker + session report builder + workflow `apply-playbooks` | ✅ 2026-05-10 |
+| **Sem 3** — classifier real Gemini Flash con top-2 margin ≥ 0.15 + activar cron horario | ⏳ siguiente |
+| **Sem 4** — router con health scoring (PR merge rate + failure stage) + double-run en `critical: true` | — |
+
+**Smoke real `apply-playbooks` validado** vía `workflow_dispatch` el 2026-05-10 (run [`25634323138`](https://github.com/druiz07/arbolado-maintenance/actions/runs/25634323138), ~2 m 30 s). El pipeline E2E corrió, Aider real con `groq/llama-3.3-70b-versatile` ($0.0022, 5.5 s), policy engine bloqueó defensivamente un cambio dudoso, report con 11 campos committed por el bot a `main`, PR `auto:dry-run` correctamente NO abierto. Detalle en `arbolado-app:docs/auto-maintenance/arranque-plan.md` §"Hallazgos del smoke real apply-playbooks 2026-05-10".
 
 ## Dónde vive el diseño
 
@@ -45,7 +47,7 @@ El diseño completo está en **`druiz07/arbolado-app`** (privado, requiere acces
 - `docs/auto-maintenance/policy-engine-spec.md` — AST validator de `package.json`, 5 funciones + tests obligatorios
 - `docs/auto-maintenance/playbooks/bump-devdep-cve.yaml` — playbook canónico (con 6 ajustes finos integrados)
 
-## Estructura actual (post-Sem 1)
+## Estructura actual (post-Sem 2)
 
 ```
 .
@@ -54,51 +56,66 @@ El diseño completo está en **`druiz07/arbolado-app`** (privado, requiere acces
 ├── LICENSE                            # MIT
 ├── .gitignore                         # Node defaults
 ├── .github/workflows/
-│   └── loop.yml                       # cron orchestrator (Sem 1: tests + observe-signals)
+│   └── loop.yml                       # cron orchestrator
+│                                      #   - test-runner (cron + push)
+│                                      #   - observe-signals (cron + push, KV listing)
+│                                      #   - apply-playbooks (workflow_dispatch en Sem 2;
+│                                      #     cron horario al activar Sem 3)
 ├── cloudflare/
 │   ├── NOTES.md                       # KV namespace ID + schema + wrangler.toml template
-│   └── worker/                        # ✅ Sem 1
+│   └── worker/                        # ✅ Sem 1 — 6/6 tests
 │       ├── wrangler.toml              # cron */30 + KV binding STATE
 │       ├── package.json               # zod + wrangler + types
 │       ├── tsconfig.json              # strict + workers-types + node
-│       ├── src/
-│       │   ├── worker.ts              # entry: scheduled() + fetch() de dev
-│       │   ├── signal-schema.ts       # zod schema + generateSignalHash (SHA-256)
-│       │   ├── dependabot.ts          # cliente API Dependabot Alerts
-│       │   └── normalize.ts           # alert → Signal canónico
-│       └── test/
-│           └── normalize.test.ts      # 6/6 pasan
-├── runner/                            # ✅ Sem 1
-│   ├── package.json                   # node 20 + semver
+│       ├── src/{worker,signal-schema,dependabot,normalize}.ts
+│       └── test/normalize.test.ts
+├── runner/                            # ✅ Sem 1+2 — 251/251 tests verde (~2.2 s)
+│   ├── package.json                   # node 20 + semver + js-yaml
 │   ├── README.md
-│   └── policy-engine/
-│       ├── index.js                   # re-exports
-│       ├── diff.js                    # parsePackageJsonDiff (AST, no regex)
-│       ├── semver-rules.js            # validateSemverChange (semver real)
-│       ├── operations.js              # validateOperations (forbidden > allowed)
-│       ├── equivalence.js             # astEquivalent + areDiffsCompatible (double-run)
-│       ├── lockfile.js                # validateLockfileChange
-│       ├── validate.js                # entry point validatePackageJsonChange
-│       ├── aider-helpers.js           # resolveSafeVersion + enforceMaxDiff + parseDiffStat
-│       └── *.test.js                  # 70/70 pasan
+│   ├── fixtures/sample-signal.json    # fixture canónica para smoke real
+│   ├── policy-engine/                 # ✅ Sem 1 (8 módulos JS + tests, 70 tests)
+│   │   ├── {diff,semver-rules,operations,equivalence,lockfile,validate}.js
+│   │   ├── aider-helpers.js           # resolveSafeVersion + enforceMaxDiff + parseDiffStat
+│   │   └── index.js                   # re-exports
+│   ├── playbook-loader/               # ✅ Sem 2 parcial 1 (8 módulos + tests, 45 tests)
+│   │   ├── {globs,errors,schema,normalize,index}.js
+│   │   └── *.test.js
+│   ├── aider-invoker/                 # ✅ Sem 2 parcial 2 (9 módulos + tests, 38 mocks + smoke gated)
+│   │   ├── {errors,flags,parser,runtime,settings,index}.js
+│   │   └── smoke.test.js              # gated por AIDER_SMOKE=1 (llamada real a Groq)
+│   ├── session-report/                # ✅ Sem 2 parcial 3 (5 módulos + tests, 71 tests)
+│   │   ├── {signal-hash,schema,builder,writer,index}.js
+│   │   └── *.test.js
+│   └── scripts/cli/                   # thin orchestrators consumidos por loop.yml
+│       ├── load-playbook.mjs
+│       ├── policy-validate.mjs
+│       ├── enforce-max-diff.mjs
+│       └── build-and-write-report.mjs
 └── docs/auto-maintenance/
-    ├── playbooks/                     # ✅ Sem 1
+    ├── playbooks/                     # ✅ Sem 1 — mirror del canónico
     │   ├── README.md
-    │   ├── bump-devdep-cve.yaml       # mirror del canónico (autoritativo en arbolado-app)
-    │   ├── fix-tests-minor-version-bump.yaml  # derivado
-    │   ├── rollback-on-build-failure.yaml     # derivado, critical: true
-    │   └── lint-prettier-autofix.yaml         # derivado
-    └── session-reports/               # creado en Sem 2 cuando arranque el dataset JSON
+    │   ├── bump-devdep-cve.yaml       # mirror (autoritativo en arbolado-app)
+    │   ├── fix-tests-minor-version-bump.yaml
+    │   ├── rollback-on-build-failure.yaml     # critical: true
+    │   └── lint-prettier-autofix.yaml
+    └── session-reports/               # ✅ alimentado por el bot tras cada apply-playbooks
+        └── <YYYY-MM-DD>/<playbook-id>-<short-hash-12>.json
 ```
 
 ## Cómo correr los tests en local
 
 ```powershell
-# Policy engine (Node 20, runtime real del loop)
+# Runner completo (policy-engine + playbook-loader + aider-invoker + session-report)
 cd runner
 npm install
 npm test
-# ✔ 70 tests, 0 fail (~220 ms)
+# ✔ 251 tests, 0 fail (~2.2 s)
+
+# Smoke real opcional del aider-invoker (consume Groq tokens reales, ~6 s, ~$0.0015)
+$env:AIDER_SMOKE = "1"
+$env:GROQ_API_KEY = "<tu key>"
+npm test
+# ✔ 252 tests con smoke
 
 # Worker detector (TypeScript)
 cd ../cloudflare/worker
@@ -108,14 +125,23 @@ npm test
 # ✔ 6 tests, 0 fail (~300 ms)
 ```
 
-## A añadir en Sem 2
+## Cómo disparar el smoke de `apply-playbooks` en CI
+
+```powershell
+# Manual, desde local. Requiere los 4 secrets vivos en el repo.
+gh workflow run maintenance-loop --repo druiz07/arbolado-maintenance
+gh run watch <run-id> --repo druiz07/arbolado-maintenance --exit-status
+```
+
+El job `apply-playbooks` está `gated` por `workflow_dispatch` durante Sem 2 — se activa en cron horario al integrar el classifier real (Sem 3).
+
+## A añadir en Sem 3
 
 ```
-runner/aider/                          # invoker headless con flags estrictos
-runner/session-report/                 # builder del JSON con 10 campos obligatorios
-runner/playbook-loader/                # loader YAML + validador de schema
-docs/auto-maintenance/session-reports/<YYYY-MM-DD>/<playbook>-<hash>.json
-.github/workflows/loop.yml             # añadir job apply-playbooks (Aider) tras observe-signals
+runner/classifier/                     # cliente Gemini Flash + prompt + top-2 margin ≥ 0.15
+runner/scripts/cli/classify.mjs        # CLI consumido por loop.yml para reemplazar el hardcode
+.github/workflows/loop.yml             # quitar `if: workflow_dispatch` del job apply-playbooks
+                                       # + step previo que itera signal:* del KV
 ```
 
 ## Desarrollo local
