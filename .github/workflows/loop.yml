@@ -18,7 +18,12 @@ on:
     # Cada hora, alineado con la cadencia de Sem 1 (validar contratos, no acción todavía).
     # Sube/baja en Sem 2-4 según volumen real de signals.
     - cron: '0 * * * *'
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      seed_test_signal:
+        description: 'Sembrar signal:sem3-smoke-task12 en KV antes del job (debug E2E).'
+        type: boolean
+        default: false
 
 # Opt-in temprano al runtime Node 24 para JS-based actions.
 # A partir de 2026-06-02 GitHub lo fuerza por defecto; lo activamos antes para validar
@@ -171,6 +176,26 @@ jobs:
 
       - name: Prepare workspace dirs
         run: mkdir -p workspace/intermediate workspace/state
+
+      # ---------- 1b. (Debug) Sembrar signal de prueba si se pidió ----------
+      # Solo activable vía workflow_dispatch con inputs.seed_test_signal=true.
+      # Útil para smoke E2E cuando KV no tiene signals frescos (Sesión C).
+      # No corre en cron (inputs no existe). Diseño: token local del usuario
+      # puede ser read-only; el secret del repo tiene KV write.
+      - name: Seed test signal in KV (debug only)
+        if: github.event_name == 'workflow_dispatch' && inputs.seed_test_signal == true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          SIGNAL='{"source":"worker","dependency":"eslint","current_version":"^8.54.0","vulnerable_versions":"<8.56.0","patched_versions":">=8.56.0","severity":"high","is_transitive":false,"dependency_type":"dev","advisory_id":"GHSA-sem3-task12","detected_at":"2026-05-10T20:00:00Z","signal_version":1}'
+          curl -fsS -X PUT \
+            "https://api.cloudflare.com/client/v4/accounts/e4ccfa519c1e0fb94221ca6583220545/storage/kv/namespaces/212fe2e1b8874298ad44a9a906375033/values/signal:sem3-smoke-task12" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: text/plain" \
+            --data-raw "$SIGNAL" \
+            -o /tmp/seed-response.json
+          jq . /tmp/seed-response.json
+          echo "✓ seeded signal:sem3-smoke-task12 in KV"
 
       # ---------- 2. Pipeline state machine ----------
       # Cada step escribe workspace/state/<step>.outcome con success|failure y
