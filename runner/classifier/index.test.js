@@ -86,3 +86,45 @@ test('classifySignal propaga ClassifierApiError en fallo de red', async () => {
     /ClassifierApiError/,
   );
 });
+
+// ---- Smoke real — sólo corre con CLASSIFIER_SMOKE=1 + GEMINI_API_KEY local ----
+test('SMOKE: clasifica signal real con Gemini Flash live', { skip: process.env.CLASSIFIER_SMOKE !== '1' }, async () => {
+  const apiKey = process.env.GEMINI_API_KEY;
+  assert.ok(apiKey, 'GEMINI_API_KEY env required for smoke');
+
+  const playbooks = [
+    {
+      id: 'bump-devdep-cve',
+      description: 'Aplica parche automático a CVEs en devDependencies',
+      classifierRules: 'Solo si dependency_type == dev y patched_versions presente.',
+      classifyConfidenceMin: 0.7,
+      marginThreshold: 0.15,
+    },
+    {
+      id: 'rollback-on-build-failure',
+      description: 'Rollback automático si CI falla post-release',
+      classifierRules: 'Solo si source == ci_failure y post-release.',
+      classifyConfidenceMin: 0.8,
+      marginThreshold: 0.20,
+    },
+    {
+      id: 'lint-prettier-autofix',
+      description: 'Drift de formato — autofix prettier',
+      classifierRules: 'Solo si source == lint_drift.',
+      classifyConfidenceMin: 0.5,
+      marginThreshold: 0.10,
+    },
+  ];
+
+  const t0 = Date.now();
+  const r = await classifySignal({ signal: SIGNAL, playbooks, apiKey });
+  const ms = Date.now() - t0;
+
+  console.log(`SMOKE classifier latency=${ms}ms tokens=${JSON.stringify(r.usage)}`);
+  console.log(`SMOKE rankings=${JSON.stringify(r.rankings)}`);
+
+  assert.equal(r.ok, true, `expected ok, got: ${JSON.stringify(r)}`);
+  assert.equal(r.playbookId, 'bump-devdep-cve', 'expected bump-devdep-cve as winner');
+  assert.ok(r.margin >= 0.15, `margin ${r.margin} < 0.15`);
+  assert.ok(ms < 10000, `latency ${ms}ms > 10s`);
+});
