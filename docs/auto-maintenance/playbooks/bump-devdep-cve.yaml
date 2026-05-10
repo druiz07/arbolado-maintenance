@@ -108,6 +108,13 @@ constraints:
 
 execution:
   model_strategy:
+    # TODO Sem 4 (router LLM): `groq/kimi-k2` es alias informal. El smoke real
+    # del 2026-05-10 confirmó que en Groq Cloud free tier no existe ningún
+    # modelo Kimi K2 disponible para la cuenta del usuario (ni alias antiguo
+    # ni `kimi-k2-instruct-0905`). El router debe consultar
+    # https://api.groq.com/openai/v1/models al inicio y resolver alias →
+    # modelo real disponible (p.ej. `groq/llama-3.3-70b-versatile` como
+    # primary actual, validado con smoke real 2026-05-10 — coste $0.0015 / 6s).
     primary: groq/kimi-k2
     fallback: google/gemini-2.5-flash
     backup: openrouter/free

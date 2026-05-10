@@ -96,6 +96,11 @@ constraints:
 
 execution:
   model_strategy:
+    # TODO Sem 4 (router LLM): `groq/kimi-k2` es alias informal. El smoke real
+    # del 2026-05-10 confirmó que en Groq Cloud free tier no existe ningún
+    # modelo Kimi K2 disponible para la cuenta del usuario. El router debe
+    # consultar https://api.groq.com/openai/v1/models y resolver alias →
+    # modelo real (p.ej. `groq/llama-3.3-70b-versatile`).
     primary: groq/kimi-k2
     fallback: google/gemini-2.5-flash
     backup: openrouter/free
