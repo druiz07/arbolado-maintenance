@@ -17,12 +17,15 @@ function mockSpawn({ stdoutChunks = [], stderrChunks = [], exitCode = 0, exitDel
       return child;
     }
 
+    // Orden determinista: primero emit chunks (en setImmediate para que el
+    // runtime tenga tiempo de registrar los listeners), luego close tras
+    // exitDelayMs. Sin esto hay race: el close puede llegar antes que los
+    // chunks si exitDelayMs es muy pequeño.
     setImmediate(() => {
       for (const c of stdoutChunks) child.stdout.emit('data', Buffer.from(c, 'utf8'));
       for (const c of stderrChunks) child.stderr.emit('data', Buffer.from(c, 'utf8'));
+      setTimeout(() => child.emit('close', exitCode), exitDelayMs);
     });
-
-    setTimeout(() => child.emit('close', exitCode), exitDelayMs);
     return child;
   };
   fn.calls = calls;
