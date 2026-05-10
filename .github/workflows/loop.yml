@@ -197,11 +197,9 @@ jobs:
         working-directory: runner
         run: |
           PB_ID=$(jq -r '.playbookId' ../workspace/intermediate/classifier.json)
-          node --input-type=module -e "
-            import { loadPlaybook } from './playbook-loader/index.js';
-            const pb = await loadPlaybook('../docs/auto-maintenance/playbooks/${PB_ID}.yaml');
-            console.log(JSON.stringify(pb));
-          " > ../workspace/intermediate/playbook.json
+          node scripts/cli/load-playbook.mjs \
+            "../docs/auto-maintenance/playbooks/${PB_ID}.yaml" \
+            > ../workspace/intermediate/playbook.json
           echo success > ../workspace/state/load-playbook.outcome
         continue-on-error: true
 
