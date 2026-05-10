@@ -1,6 +1,7 @@
-import { buildAiderArgv, providerFromModel } from './flags.js';
+import { buildAiderArgv, providerFromModel, supportsTemperature } from './flags.js';
 import { extractDiff, extractFilesEdited, hasValidDiff } from './parser.js';
 import { runProcess } from './runtime.js';
+import { writeModelSettingsFile, removeModelSettingsFile } from './settings.js';
 
 const PROVIDER_ENV = {
   groq: 'GROQ_API_KEY',
@@ -21,6 +22,8 @@ export async function invokeAider({
   timeoutMs = 120_000,
   signal_abort,
   _runProcess = runProcess,
+  _writeModelSettingsFile = writeModelSettingsFile,
+  _removeModelSettingsFile = removeModelSettingsFile,
 }) {
   if (!Array.isArray(files) || files.length === 0) {
     throw new Error('invokeAider: files must be non-empty array');
@@ -35,6 +38,8 @@ export async function invokeAider({
     );
   }
 
+  const aider = playbook.execution.aider;
+
   const provider = providerFromModel(model);
   const envVar = provider ? PROVIDER_ENV[provider] : null;
   const childEnv = {
@@ -44,40 +49,52 @@ export async function invokeAider({
   };
   if (envVar && apiKey) childEnv[envVar] = apiKey;
 
-  const argv = buildAiderArgv({
-    model,
-    prompt,
-    files,
-    executionAider: playbook.execution.aider,
-  });
+  // Aider 0.86.2 no acepta --temperature CLI; la temperatura del playbook se
+  // transmite generando un model-settings-file temporal y pasándolo por flag.
+  let settingsHandle = null;
+  if (typeof aider.temperature === 'number' && supportsTemperature(model)) {
+    settingsHandle = _writeModelSettingsFile(model, aider.temperature);
+  }
 
-  const r = await _runProcess({
-    binPath: aiderBinPath,
-    args: argv,
-    env: childEnv,
-    cwd: workdir,
-    timeoutMs,
-    abortSignal: signal_abort,
-  });
+  try {
+    const argv = buildAiderArgv({
+      model,
+      prompt,
+      files,
+      executionAider: aider,
+      modelSettingsFilePath: settingsHandle?.path,
+    });
 
-  const diff = extractDiff(r.stdout);
-  const filesEdited = extractFilesEdited(r.stdout);
-  const validDiff = hasValidDiff(r.stdout);
+    const r = await _runProcess({
+      binPath: aiderBinPath,
+      args: argv,
+      env: childEnv,
+      cwd: workdir,
+      timeoutMs,
+      abortSignal: signal_abort,
+    });
 
-  let errorClass = null;
-  if (r.timedOut) errorClass = 'timeout';
-  else if (r.aborted) errorClass = 'process';
-  else if (r.exitCode !== 0) errorClass = 'process';
-  else if (!validDiff) errorClass = 'no_diff';
+    const diff = extractDiff(r.stdout);
+    const filesEdited = extractFilesEdited(r.stdout);
+    const validDiff = hasValidDiff(r.stdout);
 
-  return {
-    exitCode: r.exitCode,
-    durationMs: r.durationMs,
-    diff,
-    stdout: r.stdout,
-    stderr: r.stderr,
-    filesEdited,
-    modelUsed: model,
-    errorClass,
-  };
+    let errorClass = null;
+    if (r.timedOut) errorClass = 'timeout';
+    else if (r.aborted) errorClass = 'process';
+    else if (r.exitCode !== 0) errorClass = 'process';
+    else if (!validDiff) errorClass = 'no_diff';
+
+    return {
+      exitCode: r.exitCode,
+      durationMs: r.durationMs,
+      diff,
+      stdout: r.stdout,
+      stderr: r.stderr,
+      filesEdited,
+      modelUsed: model,
+      errorClass,
+    };
+  } finally {
+    if (settingsHandle) _removeModelSettingsFile(settingsHandle);
+  }
 }

@@ -12,7 +12,11 @@ export function supportsTemperature(model) {
   return providerFromModel(model) !== null;
 }
 
-export function buildAiderArgv({ model, prompt, files, executionAider }) {
+// Construye argv del proceso aider.
+// La temperatura se transmite vía --model-settings-file (Aider 0.86.2 NO acepta
+// --temperature como flag CLI). El caller (invokeAider) genera el archivo
+// temporal y pasa la ruta como modelSettingsFilePath.
+export function buildAiderArgv({ model, prompt, files, executionAider, modelSettingsFilePath }) {
   if (!executionAider || !Array.isArray(executionAider.args)) {
     throw new Error('buildAiderArgv: executionAider.args must be an array');
   }
@@ -30,12 +34,8 @@ export function buildAiderArgv({ model, prompt, files, executionAider }) {
 
   argv.push('--model', model);
 
-  if (
-    supportsTemperature(model) &&
-    !has('--temperature') &&
-    executionAider.temperature !== undefined
-  ) {
-    argv.push('--temperature', String(executionAider.temperature));
+  if (modelSettingsFilePath && !has('--model-settings-file')) {
+    argv.push('--model-settings-file', modelSettingsFilePath);
   }
 
   argv.push('--message', prompt);

@@ -81,29 +81,9 @@ describe('buildAiderArgv — desde execution.aider real', () => {
     assert.equal(argv[msgIdx + 1], baseArgs.prompt);
   });
 
-  it('incluye --temperature 0.1 si provider está en whitelist', () => {
+  it('NO inyecta --temperature como flag CLI (Aider 0.86.2 no lo soporta)', () => {
     const argv = buildAiderArgv(baseArgs);
-    const tIdx = argv.indexOf('--temperature');
-    assert.notEqual(tIdx, -1);
-    assert.equal(argv[tIdx + 1], '0.1');
-  });
-
-  it('NO incluye --temperature si provider desconocido', () => {
-    const argv = buildAiderArgv({ ...baseArgs, model: 'mistral/foo' });
     assert.equal(argv.indexOf('--temperature'), -1);
-  });
-
-  it('NO duplica --temperature si el playbook ya lo trae', () => {
-    const argv = buildAiderArgv({
-      ...baseArgs,
-      executionAider: {
-        ...baseArgs.executionAider,
-        args: [...baseArgs.executionAider.args, '--temperature', '0.5'],
-      },
-    });
-    assert.equal(argv.filter(a => a === '--temperature').length, 1);
-    const i = argv.indexOf('--temperature');
-    assert.equal(argv[i + 1], '0.5');
   });
 
   it('archivos van al final del argv', () => {
@@ -127,5 +107,44 @@ describe('buildAiderArgv — desde execution.aider real', () => {
       () => buildAiderArgv({ ...baseArgs, executionAider: { args: 'not-an-array' } }),
       /args.*array/,
     );
+  });
+});
+
+describe('buildAiderArgv — modelSettingsFilePath', () => {
+  const baseArgs = {
+    model: 'groq/moonshotai/kimi-k2-instruct',
+    prompt: 'Bump jest',
+    files: ['/tmp/sandbox/package.json'],
+    executionAider: {
+      args: ['--no-stream', '--yes'],
+    },
+  };
+
+  it('incluye --model-settings-file <path> si modelSettingsFilePath está set', () => {
+    const argv = buildAiderArgv({ ...baseArgs, modelSettingsFilePath: '/tmp/aider-settings/x.yml' });
+    const i = argv.indexOf('--model-settings-file');
+    assert.notEqual(i, -1);
+    assert.equal(argv[i + 1], '/tmp/aider-settings/x.yml');
+  });
+
+  it('NO incluye --model-settings-file si modelSettingsFilePath es undefined/null', () => {
+    assert.equal(buildAiderArgv(baseArgs).indexOf('--model-settings-file'), -1);
+    assert.equal(
+      buildAiderArgv({ ...baseArgs, modelSettingsFilePath: null }).indexOf('--model-settings-file'),
+      -1,
+    );
+  });
+
+  it('NO duplica --model-settings-file si el playbook ya lo trae', () => {
+    const argv = buildAiderArgv({
+      ...baseArgs,
+      executionAider: {
+        args: [...baseArgs.executionAider.args, '--model-settings-file', '/playbook/path.yml'],
+      },
+      modelSettingsFilePath: '/temp/path.yml',
+    });
+    assert.equal(argv.filter(a => a === '--model-settings-file').length, 1);
+    const i = argv.indexOf('--model-settings-file');
+    assert.equal(argv[i + 1], '/playbook/path.yml');
   });
 });
