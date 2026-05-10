@@ -10,10 +10,11 @@
 import { mkdir, writeFile, rename, stat, access } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { validateReport } from './schema.js';
+import { truncateSignalHash } from './signal-hash.js';
 
 export function computeReportPath(repoRoot, report) {
   const date = report.timestamp.slice(0, 10);
-  const shortHash = report.signal_hash.slice(0, 12);
+  const shortHash = truncateSignalHash(report.signal_hash);
   const filename = `${report.playbook_id}-${shortHash}.json`;
   return join(repoRoot, 'docs', 'auto-maintenance', 'session-reports', date, filename);
 }

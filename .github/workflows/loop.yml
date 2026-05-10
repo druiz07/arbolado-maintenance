@@ -352,10 +352,10 @@ jobs:
           fi
 
           SIGNAL_HASH=$(node --input-type=module -e "
-            import { generateSignalHash } from '../runner/session-report/index.js';
+            import { shortSignalHash } from '../runner/session-report/index.js';
             import { readFile } from 'node:fs/promises';
             const s = JSON.parse(await readFile('../workspace/intermediate/signal.json','utf8'));
-            process.stdout.write(generateSignalHash(s).slice(0, 12));
+            process.stdout.write(shortSignalHash(s));
           ")
           BRANCH="auto/bump-devdep-cve-${SIGNAL_HASH}"
 

@@ -1,6 +1,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { generateSignalHash } from './signal-hash.js';
+import {
+  generateSignalHash,
+  shortSignalHash,
+  truncateSignalHash,
+  SIGNAL_HASH_SHORT_LENGTH,
+} from './signal-hash.js';
 
 const BASE_SIGNAL = {
   source: 'worker',
@@ -113,5 +118,41 @@ describe('generateSignalHash — robustez', () => {
   it('lanza si dependency falta', () => {
     const { dependency: _drop, ...rest } = BASE_SIGNAL;
     assert.throws(() => generateSignalHash(rest), /dependency/);
+  });
+});
+
+describe('SIGNAL_HASH_SHORT_LENGTH — constante compartida', () => {
+  it('SIGNAL_HASH_SHORT_LENGTH is 12 (regression guard)', () => {
+    // Si cambia este valor, hay que migrar los reports históricos en
+    // docs/auto-maintenance/session-reports/ — no es un cambio inocuo.
+    assert.equal(SIGNAL_HASH_SHORT_LENGTH, 12);
+  });
+});
+
+describe('shortSignalHash — helper para callers con signal crudo', () => {
+  it('shortSignalHash returns first 12 chars of generateSignalHash', () => {
+    const full = generateSignalHash(BASE_SIGNAL);
+    const short = shortSignalHash(BASE_SIGNAL);
+    assert.equal(short.length, 12);
+    assert.equal(short, full.slice(0, 12));
+  });
+
+  it('produce el mismo short hash de forma determinista', () => {
+    assert.equal(shortSignalHash(BASE_SIGNAL), shortSignalHash(BASE_SIGNAL));
+  });
+});
+
+describe('truncateSignalHash — helper para callers con hash ya calculado', () => {
+  it('truncateSignalHash returns first 12 chars of an existing hash', () => {
+    const full = generateSignalHash(BASE_SIGNAL);
+    const truncated = truncateSignalHash(full);
+    assert.equal(truncated.length, 12);
+    assert.equal(truncated, full.slice(0, 12));
+  });
+
+  it('shortSignalHash y truncateSignalHash dan el mismo resultado para el mismo signal', () => {
+    const fromSignal = shortSignalHash(BASE_SIGNAL);
+    const fromHash = truncateSignalHash(generateSignalHash(BASE_SIGNAL));
+    assert.equal(fromSignal, fromHash);
   });
 });

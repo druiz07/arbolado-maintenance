@@ -4,7 +4,12 @@
 export { buildReport } from './builder.js';
 export { validateReport, REPORT_FIELDS, FAILURE_STAGES } from './schema.js';
 export { writeReport, computeReportPath } from './writer.js';
-export { generateSignalHash } from './signal-hash.js';
+export {
+  generateSignalHash,
+  shortSignalHash,
+  truncateSignalHash,
+  SIGNAL_HASH_SHORT_LENGTH,
+} from './signal-hash.js';
 
 import { buildReport } from './builder.js';
 import { writeReport } from './writer.js';
