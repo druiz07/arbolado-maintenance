@@ -187,8 +187,9 @@ jobs:
         run: |
           node scripts/cli/load-next-signal.mjs > ../workspace/intermediate/signal-load.json
           HAS=$(jq -r '.hasSignal' ../workspace/intermediate/signal-load.json)
+          echo "has-signal=$HAS" >> $GITHUB_OUTPUT
           if [ "$HAS" = "false" ]; then
-            echo "No unseen signals in KV — exiting job gracefully"
+            echo "No unseen signals in KV — exiting job gracefully (downstream gated por has-signal=='true')"
             echo no-signal > ../workspace/state/load-signal.outcome
             exit 0
           fi
@@ -200,7 +201,7 @@ jobs:
 
       - name: Classify signal → playbook (Gemini 2.5 Flash, top-2 margin ≥ 0.15)
         id: classify
-        if: steps.load-signal.outcome == 'success'
+        if: steps.load-signal.outputs.has-signal == 'true'
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         working-directory: runner
@@ -350,7 +351,7 @@ jobs:
       # El report registra el failure_stage según los outcomes acumulados.
       - name: Build and write session report
         id: write-report
-        if: always() && steps.load-signal.outcome == 'success'
+        if: always() && steps.load-signal.outputs.has-signal == 'true'
         working-directory: runner
         run: |
           node scripts/cli/build-and-write-report.mjs .. \
