@@ -359,9 +359,11 @@ jobs:
 
           git config user.name 'arbolado-maintenance-bot'
           git config user.email 'maintenance-bot@users.noreply.github.com'
-          git checkout -b "$BRANCH"
+          git checkout -B "$BRANCH"
           git add package.json package-lock.json || true
-          git commit -m "[AUTO-DRY-RUN][playbook:bump-devdep-cve] $(jq -r '.dependency' ../workspace/intermediate/signal.json) $(jq -r '.patched_versions' ../workspace/intermediate/signal.json)"
+          # --allow-empty: Aider may produce a no-op when the dep is already at the patched version;
+          # the PR is still useful as an audit trail (body links the run_id and signal hash).
+          git commit --allow-empty -m "[AUTO-DRY-RUN][playbook:bump-devdep-cve] $(jq -r '.dependency' ../workspace/intermediate/signal.json) $(jq -r '.patched_versions' ../workspace/intermediate/signal.json)"
           git push origin "$BRANCH"
 
           gh pr create \
