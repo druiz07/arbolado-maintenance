@@ -137,11 +137,18 @@ El job `apply-playbooks` está `gated` por `workflow_dispatch` durante Sem 2 —
 
 ## A añadir en Sem 3
 
+> **Plan detallado commiteado** (en `arbolado-app:docs/superpowers/plans/2026-05-10-g5-sem3-classifier-cron.md`, commit `180ff53`): 14 tasks repartidas en 3 sesiones (A: módulo `classifier/` standalone con tests mocked; B: módulo `signal-loader/` desde KV + integración `loop.yml` todavía gated; C: smoke real con `GEMINI_API_KEY` + flip cron + commit del cierre). Suite esperada al cierre Sesión B = **298/298**.
+
 ```
-runner/classifier/                     # cliente Gemini Flash + prompt + top-2 margin ≥ 0.15
-runner/scripts/cli/classify.mjs        # CLI consumido por loop.yml para reemplazar el hardcode
-.github/workflows/loop.yml             # quitar `if: workflow_dispatch` del job apply-playbooks
-                                       # + step previo que itera signal:* del KV
+runner/classifier/                     # 6 ficheros (errors, prompt, client, parser, threshold, index)
+                                       # + 31 tests mocked + 1 smoke gated CLASSIFIER_SMOKE=1
+runner/signal-loader/                  # 4 ficheros (errors, kv-client, dedup, index)
+                                       # + 16 tests mocked
+runner/scripts/cli/                    # +3 CLIs: load-next-signal, classify-signal, mark-signal-seen
+.github/workflows/loop.yml             # 2 steps reemplazados (Load signal: fixture→KV;
+                                       # Classify: hardcoded→CLI Gemini Flash) + 1 step nuevo
+                                       # (Mark signal as seen, TTL 30d). Task 13: borrar
+                                       # `if: workflow_dispatch` → cron horario activo.
 ```
 
 ## Desarrollo local

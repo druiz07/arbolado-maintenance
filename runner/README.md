@@ -4,11 +4,17 @@ Sin dependencia del producto (`arbolado-app`). Solo orquestación:
 
 | Carpeta | Estado | Para qué |
 |---|---|---|
-| `policy-engine/` | ✅ Sem 1 | AST validator de `package.json` (5 funciones + entry point + helpers Aider). Sin LLM, sin red. Testeable local. |
-| `classifier/` | — Sem 3 | Llama a Gemini Flash para mapear signal→playbook con regla top-2 margin ≥ 0.15 |
-| `router/` | — Sem 4 | Health scoring de proveedores LLM (Groq/Gemini/OpenRouter) — `pr_merge_rate`, `failure_stage`, latencia |
-| `aider/` | — Sem 2 | Invoker de Aider headless con flags estrictos + input slicing por playbook |
-| `session-report/` | — Sem 2 | Builder del JSON estructurado de cada ciclo (10 campos obligatorios) |
+| `policy-engine/` | ✅ Sem 1 | AST validator de `package.json` (5 funciones + entry point + helpers Aider). Sin LLM, sin red. Testeable local. **70 tests.** |
+| `playbook-loader/` | ✅ Sem 2 parcial 1 | Parser + validador de los YAMLs canónicos (`trigger`/`classifier`/`constraints`/`execution`). Forma normalizada que loop.yml consume. **45 tests.** |
+| `aider-invoker/` | ✅ Sem 2 parcial 2 | Invoker de Aider headless 0.86.2 con flags estrictos (`--no-stream`/`--yes`/`--map-tokens 0`/`--edit-format diff`) + input slicing + `--model-settings-file` para temperatura. **38 tests mocked + 1 smoke gated por `AIDER_SMOKE=1`.** |
+| `session-report/` | ✅ Sem 2 parcial 3 | Builder + writer del JSON estructurado (11 campos obligatorios incluyendo `failure_stage`). Path determinista `<YYYY-MM-DD>/<playbook-id>-<short-hash-12>.json`, idempotente, escritura atómica. **71 tests.** |
+| `scripts/cli/` | ✅ Sem 2 parcial 3 | 4 thin orchestrators consumidos por `loop.yml` (`load-playbook`, `policy-validate`, `enforce-max-diff`, `build-and-write-report`). Sin tests propios — cubiertos por tests de los módulos que invocan. |
+| `fixtures/` | ✅ Sem 2 parcial 3 | `sample-signal.json` para smoke real apply-playbooks. |
+| `classifier/` | ⏳ Sem 3 (plan en arbolado-app) | Cliente Gemini 2.5 Flash + prompt + regla top-2 margin ≥ 0.15 + `classify_confidence_min` del playbook ganador. Plan: `docs/superpowers/plans/2026-05-10-g5-sem3-classifier-cron.md` (Tasks 1-6). |
+| `signal-loader/` | ⏳ Sem 3 (plan en arbolado-app) | Cliente REST de Cloudflare KV (list/get/put paginado) + dedup `signal_seen:<hash>` con TTL 30d. Plan: mismo fichero (Tasks 7-11). |
+| `router/` | — Sem 4 | Health scoring de proveedores LLM (Groq/Gemini/OpenRouter) — `pr_merge_rate`, `failure_stage`, latencia. Resolverá alias informales (`groq/kimi-k2`) consultando `GET /v1/models`. |
+
+**Suite total runner: 251/251 verde** (~2.2 s con `npm test`). **Smoke real apply-playbooks validado** vía `workflow_dispatch` el 2026-05-10 — pipeline E2E corre, comportamiento defensivo confirmado por policy engine.
 
 ## Cómo correr los tests
 
