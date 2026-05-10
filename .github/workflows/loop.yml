@@ -20,6 +20,14 @@ on:
     - cron: '0 * * * *'
   workflow_dispatch: {}
 
+# Opt-in temprano al runtime Node 24 para JS-based actions.
+# A partir de 2026-06-02 GitHub lo fuerza por defecto; lo activamos antes para validar
+# y eliminar el warning "Node.js 20 actions are deprecated" en upload-artifact@v5.
+# Cuando todas las actions usadas tengan release nativo Node 24, este env var es
+# innecesario y se puede quitar (ver docs/incident-response.md §5 — entrada 2026-05-25).
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 permissions:
   contents: read
   issues: write   # para abrir issues si signal contract drift
