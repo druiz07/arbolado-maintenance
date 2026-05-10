@@ -8,8 +8,8 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "test": "node --test --test-reporter=spec policy-engine/*.test.js playbook-loader/*.test.js",
-    "test:watch": "node --test --watch --test-reporter=spec policy-engine/*.test.js playbook-loader/*.test.js"
+    "test": "node --test --test-reporter=spec policy-engine/*.test.js playbook-loader/*.test.js aider-invoker/*.test.js",
+    "test:watch": "node --test --watch --test-reporter=spec policy-engine/*.test.js playbook-loader/*.test.js aider-invoker/*.test.js"
   },
   "dependencies": {
     "js-yaml": "^4.1.0",
