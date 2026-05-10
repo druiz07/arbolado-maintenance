@@ -177,18 +177,49 @@ jobs:
       # workspace/intermediate/<step>.json con su output. write-report compone
       # los argumentos finales leyendo esos archivos.
 
-      - name: Load signal (parcial 3 — desde fixture; Sem 3 = KV de Cloudflare)
+      - name: Load next unseen signal from Cloudflare KV
         id: load-signal
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT_ID: e4ccfa519c1e0fb94221ca6583220545
+          KV_NAMESPACE_ID: 212fe2e1b8874298ad44a9a906375033
+        working-directory: runner
         run: |
-          cp runner/fixtures/sample-signal.json workspace/intermediate/signal.json
-          echo success > workspace/state/load-signal.outcome
+          node scripts/cli/load-next-signal.mjs > ../workspace/intermediate/signal-load.json
+          HAS=$(jq -r '.hasSignal' ../workspace/intermediate/signal-load.json)
+          if [ "$HAS" = "false" ]; then
+            echo "No unseen signals in KV — exiting job gracefully"
+            echo no-signal > ../workspace/state/load-signal.outcome
+            exit 0
+          fi
+          jq '.signal' ../workspace/intermediate/signal-load.json > ../workspace/intermediate/signal.json
+          jq -r '.signalHash' ../workspace/intermediate/signal-load.json > ../workspace/intermediate/signal-hash.txt
+          jq -r '.kvKey' ../workspace/intermediate/signal-load.json > ../workspace/intermediate/signal-kv-key.txt
+          echo success > ../workspace/state/load-signal.outcome
         continue-on-error: true
 
-      - name: Classify signal → playbook (parcial 3 — hardcoded; Sem 3 = Gemini Flash)
+      - name: Classify signal → playbook (Gemini 2.5 Flash, top-2 margin ≥ 0.15)
         id: classify
+        if: steps.load-signal.outcome == 'success'
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        working-directory: runner
         run: |
-          echo '{"playbookId":"bump-devdep-cve","margin":null}' > workspace/intermediate/classifier.json
-          echo success > workspace/state/classify.outcome
+          node scripts/cli/classify-signal.mjs \
+            ../workspace/intermediate/signal.json \
+            ../docs/auto-maintenance/playbooks/ \
+            > ../workspace/intermediate/classifier.json
+          OK=$(jq -r '.ok' ../workspace/intermediate/classifier.json)
+          if [ "$OK" = "true" ]; then
+            PB_ID=$(jq -r '.playbookId' ../workspace/intermediate/classifier.json)
+            echo "✓ classifier accepted playbook=$PB_ID margin=$(jq -r '.margin' ../workspace/intermediate/classifier.json)"
+            echo success > ../workspace/state/classify.outcome
+          else
+            REASON=$(jq -r '.reason' ../workspace/intermediate/classifier.json)
+            HINT=$(jq -r '.playbookHint' ../workspace/intermediate/classifier.json)
+            echo "✗ classifier rejected reason=$REASON hint=$HINT"
+            echo failure > ../workspace/state/classify.outcome
+          fi
         continue-on-error: true
 
       - name: Load playbook (loader)
