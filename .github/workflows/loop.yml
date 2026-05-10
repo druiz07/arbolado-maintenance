@@ -204,11 +204,16 @@ jobs:
         continue-on-error: true
 
       # ---------- 3. Pre-Aider: snapshot del package.json ----------
+      # NOTA: arbolado-app no tiene package.json en root — vive en electron-app/.
+      # Smoke real 2026-05-10 reveló esta asunción rota. Si en el futuro otro
+      # playbook toca otro subdir del repo target, parametrizar esto desde
+      # constraints.allowed_paths del playbook (ahora hardcoded al subdir único
+      # que existe).
       - name: Snapshot package.json antes de Aider
         id: snapshot-before
         if: steps.load-playbook.outcome == 'success'
         run: |
-          cp app/package.json workspace/intermediate/package.before.json
+          cp app/electron-app/package.json workspace/intermediate/package.before.json
           echo success > workspace/state/snapshot-before.outcome
         continue-on-error: true
 
@@ -228,8 +233,8 @@ jobs:
             const r = await invokeAider({
               playbook: pb,
               signal,
-              workdir: '../app',
-              files: ['../app/package.json'],
+              workdir: '../app/electron-app',
+              files: ['package.json'],
               model: process.env.AIDER_MODEL,
               apiKey: process.env.GROQ_API_KEY,
               prompt: 'Bump ' + signal.dependency + ' to ' + signal.patched_versions + ' in devDependencies',
@@ -245,7 +250,7 @@ jobs:
         id: snapshot-after
         if: steps.invoke-aider.outcome == 'success'
         run: |
-          cp app/package.json workspace/intermediate/package.after.json
+          cp app/electron-app/package.json workspace/intermediate/package.after.json
           echo success > workspace/state/snapshot-after.outcome
         continue-on-error: true
 
@@ -272,11 +277,11 @@ jobs:
       - name: enforceMaxDiff
         id: enforce-max-diff
         if: steps.snapshot-after.outcome == 'success'
-        working-directory: app
+        working-directory: app/electron-app
         run: |
           git diff --stat HEAD -- package.json package-lock.json \
-            > ../workspace/intermediate/git-diff-stat.txt
-          cd ../runner
+            > ../../workspace/intermediate/git-diff-stat.txt
+          cd ../../runner
           node scripts/cli/enforce-max-diff.mjs \
             ../workspace/intermediate/playbook.json \
             ../workspace/intermediate/git-diff-stat.txt \
@@ -293,20 +298,20 @@ jobs:
       - name: CI tests (arbolado-app)
         id: ci-tests
         if: steps.policy-validate.outcome == 'success' && steps.enforce-max-diff.outcome == 'success'
-        working-directory: app
+        working-directory: app/electron-app
         run: |
           npm ci
           npm test
-          echo success > ../workspace/state/ci-tests.outcome
+          echo success > ../../workspace/state/ci-tests.outcome
         continue-on-error: true
 
       - name: CI build (arbolado-app)
         id: ci-build
         if: steps.ci-tests.outcome == 'success'
-        working-directory: app
+        working-directory: app/electron-app
         run: |
           npm run build
-          echo success > ../workspace/state/ci-build.outcome
+          echo success > ../../workspace/state/ci-build.outcome
         continue-on-error: true
 
       # ---------- 8. Componer y escribir el session report ----------

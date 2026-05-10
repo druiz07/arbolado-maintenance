@@ -18,6 +18,11 @@ if (!repoRoot) {
   process.exit(2);
 }
 
+// Los paths internos (workspace/intermediate, workspace/state) son relativos al
+// repoRoot. El step que invoca este CLI tiene working-directory: runner, así que
+// sin chdir(repoRoot) los lookups irían a runner/workspace/* — que no existe.
+process.chdir(repoRoot);
+
 const ws = 'workspace/intermediate';
 
 async function readJsonOr(path, fallback) {
