@@ -32,8 +32,9 @@ Stack 0 € — Aider + Groq Kimi K2 + Gemini Flash + Cloudflare Workers + GH Ac
 | **Sesión 0** — repo + 4 secrets + KV namespace | ✅ 2026-05-09 |
 | **Sem 1** — policy engine + 4 playbooks YAML + Worker detector + workflow loop | ✅ 2026-05-09 |
 | **Sem 2** — playbook loader + Aider invoker + session report builder + workflow `apply-playbooks` | ✅ 2026-05-10 |
-| **Sem 3** — classifier real Gemini Flash con top-2 margin ≥ 0.15 + activar cron horario | ⏳ siguiente |
-| **Sem 4** — router con health scoring (PR merge rate + failure stage) + double-run en `critical: true` | — |
+| **Sem 3** — classifier real Gemini Flash con top-2 margin ≥ 0.15 + activar cron horario | ✅ 2026-05-10 |
+| **Sem 4 Sesión B** — feedback loop `update-on-merge` (TD-8): notify→dispatch→listener→update-merge | ✅ 2026-05-11 |
+| **Sem 4 Sesiones A/C/D/E** — alias resolution + router LLM con health scoring + double-run AST + cierre | ⏳ siguiente |
 
 **Smoke real `apply-playbooks` validado** vía `workflow_dispatch` el 2026-05-10 (run [`25634323138`](https://github.com/druiz07/arbolado-maintenance/actions/runs/25634323138), ~2 m 30 s). El pipeline E2E corrió, Aider real con `groq/llama-3.3-70b-versatile` ($0.0022, 5.5 s), policy engine bloqueó defensivamente un cambio dudoso, report con 11 campos committed por el bot a `main`, PR `auto:dry-run` correctamente NO abierto. Detalle en `arbolado-app:docs/auto-maintenance/arranque-plan.md` §"Hallazgos del smoke real apply-playbooks 2026-05-10".
 
