@@ -3,10 +3,13 @@ name: pr-merged-listener
 # se cierra. Actualiza el session report correspondiente con pr_merged.
 #
 # Payload esperado (client_payload):
-#   - signal_hash: string (hex64)
+#   - short_hash: string (hex12) — primeros 12 chars del signal_hash, presente en el filename
 #   - merged: boolean
 #   - pr_number: number (informativo, para logs)
 #   - pr_url: string (informativo)
+#
+# El listener resuelve short_hash → ruta del report localmente (sin depender
+# del search API de GitHub, que tiene latencia de indexación en repos pequeños).
 
 on:
   repository_dispatch:
@@ -33,28 +36,49 @@ jobs:
       - name: Validate payload
         id: payload
         run: |
-          HASH='${{ github.event.client_payload.signal_hash }}'
+          SHORT='${{ github.event.client_payload.short_hash }}'
           MERGED='${{ github.event.client_payload.merged }}'
-          if [ -z "$HASH" ] || [ -z "$MERGED" ]; then
-            echo "::error::Missing client_payload.signal_hash or merged"
+          if [ -z "$SHORT" ] || [ -z "$MERGED" ]; then
+            echo "::error::Missing client_payload.short_hash or merged"
             exit 1
           fi
           if [ "$MERGED" != "true" ] && [ "$MERGED" != "false" ]; then
             echo "::error::merged must be true or false, got: $MERGED"
             exit 1
           fi
-          echo "hash=$HASH" >> $GITHUB_OUTPUT
+          if ! echo "$SHORT" | grep -qE '^[a-f0-9]{12}$'; then
+            echo "::error::short_hash must be 12 hex chars, got: $SHORT"
+            exit 1
+          fi
+          echo "short=$SHORT" >> $GITHUB_OUTPUT
           echo "merged=$MERGED" >> $GITHUB_OUTPUT
-          echo "PR #${{ github.event.client_payload.pr_number }} (${{ github.event.client_payload.pr_url }}): merged=$MERGED"
+          echo "PR #${{ github.event.client_payload.pr_number }} (${{ github.event.client_payload.pr_url }}): short_hash=$SHORT merged=$MERGED"
+
+      - name: Resolve full signal_hash from local report
+        id: resolve
+        run: |
+          SHORT='${{ steps.payload.outputs.short }}'
+          FILE=$(find docs/auto-maintenance/session-reports -type f -name "*-${SHORT}.json" | head -1)
+          if [ -z "$FILE" ]; then
+            echo "::warning::No session report file matches short_hash=$SHORT — skipping (race or pre-G.5 PR)"
+            echo "found=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          FULL_HASH=$(jq -r '.signal_hash' "$FILE")
+          echo "Resolved $SHORT → $FULL_HASH (file: $FILE)"
+          echo "hash=$FULL_HASH" >> $GITHUB_OUTPUT
+          echo "found=1" >> $GITHUB_OUTPUT
 
       - name: Update session report
+        if: steps.resolve.outputs.found == '1'
         working-directory: runner
         run: |
           node scripts/cli/update-session-report-on-merge.mjs \
-            '${{ steps.payload.outputs.hash }}' \
+            '${{ steps.resolve.outputs.hash }}' \
             '${{ steps.payload.outputs.merged }}'
 
       - name: Commit and push
+        if: steps.resolve.outputs.found == '1'
         run: |
           git config user.name 'arbolado-maintenance-bot'
           git config user.email 'maintenance-bot@users.noreply.github.com'
@@ -63,5 +87,5 @@ jobs:
             echo "no changes to commit (report already at this value)"
             exit 0
           fi
-          git commit -m "update(g5): session report pr_merged=${{ steps.payload.outputs.merged }} for ${{ steps.payload.outputs.hash }}"
+          git commit -m "update(g5): session report pr_merged=${{ steps.payload.outputs.merged }} for ${{ steps.resolve.outputs.hash }}"
           git push origin HEAD:main
