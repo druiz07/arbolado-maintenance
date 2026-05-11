@@ -1,0 +1,67 @@
+name: pr-merged-listener
+# Escucha repository_dispatch desde arbolado-app cuando un PR auto:dry-run
+# se cierra. Actualiza el session report correspondiente con pr_merged.
+#
+# Payload esperado (client_payload):
+#   - signal_hash: string (hex64)
+#   - merged: boolean
+#   - pr_number: number (informativo, para logs)
+#   - pr_url: string (informativo)
+
+on:
+  repository_dispatch:
+    types: [pr-merged]
+
+jobs:
+  update-report:
+    name: Update session report pr_merged
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout (full history para commit)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate payload
+        id: payload
+        run: |
+          HASH='${{ github.event.client_payload.signal_hash }}'
+          MERGED='${{ github.event.client_payload.merged }}'
+          if [ -z "$HASH" ] || [ -z "$MERGED" ]; then
+            echo "::error::Missing client_payload.signal_hash or merged"
+            exit 1
+          fi
+          if [ "$MERGED" != "true" ] && [ "$MERGED" != "false" ]; then
+            echo "::error::merged must be true or false, got: $MERGED"
+            exit 1
+          fi
+          echo "hash=$HASH" >> $GITHUB_OUTPUT
+          echo "merged=$MERGED" >> $GITHUB_OUTPUT
+          echo "PR #${{ github.event.client_payload.pr_number }} (${{ github.event.client_payload.pr_url }}): merged=$MERGED"
+
+      - name: Update session report
+        working-directory: runner
+        run: |
+          node scripts/cli/update-session-report-on-merge.mjs \
+            '${{ steps.payload.outputs.hash }}' \
+            '${{ steps.payload.outputs.merged }}'
+
+      - name: Commit and push
+        run: |
+          git config user.name 'arbolado-maintenance-bot'
+          git config user.email 'maintenance-bot@users.noreply.github.com'
+          git add docs/auto-maintenance/session-reports/
+          if git diff --cached --quiet; then
+            echo "no changes to commit (report already at this value)"
+            exit 0
+          fi
+          git commit -m "update(g5): session report pr_merged=${{ steps.payload.outputs.merged }} for ${{ steps.payload.outputs.hash }}"
+          git push origin HEAD:main
