@@ -8,7 +8,7 @@
 
 | Playbook | Estado | Descripción |
 |---|---|---|
-| `bump-devdep-cve.yaml` | mirror del canónico (autoritativo en arbolado-app) | CVE en `devDependencies` con parche disponible |
+| `bump-devdep-cve.yaml` | ⚠ **DRIFT 2026-05-12 (TD-10)** vs canónico de arbolado-app — refinado en Sem 4 C: `aider.prompt` con disclaimer explícito anti-add_dependency + nuevo `pre_aider_steps.depExistsCheck` que documenta la precondición estructural (cableada en `runner/preconditions/dep-exists.js` + step `Check dep precondition (TD-1)` en `loop.yml`). El runtime carga ESTE mirror, no el canónico → load-bearing. Resync canónica diferida a próxima sesión cross-repo en arbolado-app. Header del propio YAML documenta el drift. | CVE en `devDependencies` con parche disponible |
 | `fix-tests-minor-version-bump.yaml` | derivado Sem 1 | tests rotos por bump menor en dep transitiva (corrige tests, no la dep) |
 | `rollback-on-build-failure.yaml` | derivado Sem 1 | rollback automático si CI falla post-merge |
 | `lint-prettier-autofix.yaml` | derivado Sem 1 | drift de formato (prettier/eslint --fix) |
