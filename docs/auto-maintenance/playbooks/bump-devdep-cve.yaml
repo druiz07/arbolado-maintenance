@@ -2,11 +2,17 @@
 # https://github.com/druiz07/arbolado-app/blob/main/docs/auto-maintenance/playbooks/bump-devdep-cve.yaml
 #
 # Esta copia existe para que el loader del runner pueda cargar todos los playbooks
-# desde un único directorio sin checkout cruzado del repo privado. Si el canónico
-# cambia, este mirror se sincroniza en el mismo PR (validación: hash idéntico salvo
-# este header).
+# desde un único directorio sin checkout cruzado del repo privado.
 #
-# Última sincronización: 2026-05-09 (Sem 1, primera copia tras Sesión 0).
+# DRIFT 2026-05-12 (Sem 4 Sesión C): el bloque `aider.prompt` de abajo se refina
+# para que el spec refleje las nuevas reglas TD-1 (precondición dep_exists +
+# disclaimer explícito "NO añadas dep si no existe"). El runtime cargado por el
+# loader es esta copia, así que es la load-bearing. La canónica en arbolado-app
+# queda desincronizada hasta TD-10 (resync canónica vía PR cross-repo).
+#
+# Históricas:
+# - 2026-05-09 (Sem 1): primera copia tras Sesión 0 — hash idéntico al canónico.
+# - 2026-05-12 (Sem 4 Sesión C): drift voluntario — ver TD-10.
 
 id: bump-devdep-cve
 version: 1
@@ -125,6 +131,14 @@ execution:
     - dedupCheck:
         key: "signal_seen:{{signal_hash}}"
         on_hit: skip_duplicate_signal
+    # TD-1 mitigation (Sem 4 Sesión C): valida que la dep ya existe en
+    # devDependencies/dependencies antes de invocar Aider. Si no existe,
+    # genera policy.json sintético con violation `precondition_dep_missing`
+    # y se salta Aider. Implementado en runner/preconditions/dep-exists.js
+    # + scripts/cli/check-dep-exists.mjs. Cableado en .github/workflows/loop.yml.
+    - depExistsCheck:
+        input: { dep: signal.dependency, dep_type: signal.dependency_type }
+        on_missing: skip_aider_with_policy_violation
   aider:
     args:
       - --no-stream
@@ -133,18 +147,26 @@ execution:
       - --edit-format diff
     temperature: 0.1
     prompt: |
-      Objetivo: corregir una vulnerabilidad CVE en devDependencies.
-      Versión segura ya resuelta: {{safe_version_selected}} (NO inventar otra).
-      SOLO modificar package.json y package-lock.json.
-      NO tocar scripts, engines ni otras secciones.
-      NO eliminar dependencias.
-      Mantener compatibilidad semver (sin major bump).
+      Objetivo: bumpear la dependencia '{{signal.dependency}}' en
+      {{#if (eq signal.dependency_type "dev")}}devDependencies{{else}}dependencies{{/if}}
+      de package.json a la versión segura {{safe_version_selected}}
+      (NO inventar otra).
+
+      REGLAS ESTRICTAS (cumplir todas):
+      - Si '{{signal.dependency}}' NO existe ya en esa sección, NO la añadas.
+        Termina sin modificar ningún fichero. (Esto NO debería ocurrir porque
+        el step depExistsCheck ya filtra; queda como defensa en profundidad.)
+      - SOLO modificar package.json y package-lock.json.
+      - NO tocar scripts, engines, name, version ni otras secciones.
+      - NO añadir ni quitar otras dependencias.
+      - Preservar el rango semver actual (caret/tilde/fijo) usando la nueva versión.
+      - NO hacer major bump aunque la nueva versión lo permita.
       {{#if signal.is_transitive}}
       Dependencia transitiva → actualizar parent: {{signal.context.parent_dependency}}
       NO toques la dep transitiva directamente.
       {{/if}}
       Señal: {{signal_json}}
-      Devuelve SOLO el diff.
+      Devuelve SOLO el diff de package.json.
   post_aider_steps:
     - enforceMaxDiff:
         max: constraints.max_diff_lines

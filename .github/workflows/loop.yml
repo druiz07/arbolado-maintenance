@@ -316,6 +316,19 @@ jobs:
             import { invokeAider } from './aider-invoker/index.js';
             const pb = JSON.parse(await readFile('../workspace/intermediate/playbook.json','utf8'));
             const signal = JSON.parse(await readFile('../workspace/intermediate/signal.json','utf8'));
+            const section = signal.dependency_type === 'dev' ? 'devDependencies' : 'dependencies';
+            const prompt = [
+              \`Objetivo: bumpear la dependencia '\${signal.dependency}' en \${section} de package.json a la versión segura \${signal.patched_versions}.\`,
+              '',
+              'REGLAS ESTRICTAS (cumplir todas):',
+              \`- Si '\${signal.dependency}' NO existe en \${section}, NO la añadas. Termina sin modificar ningún fichero.\`,
+              '- NO toques scripts, engines, name, version, ni otras secciones del package.json.',
+              '- NO añadas ni quites otras dependencias.',
+              \`- Preserva el rango semver actual (caret/tilde/fijo) usando la nueva versión \${signal.patched_versions}.\`,
+              '- NO hagas major bump aunque la nueva versión lo permita.',
+              '',
+              'Devuelve SOLO el diff de package.json.',
+            ].join('\n');
             const r = await invokeAider({
               playbook: pb,
               signal,
@@ -323,7 +336,7 @@ jobs:
               files: ['package.json'],
               model: process.env.AIDER_MODEL,
               apiKey: process.env.GROQ_API_KEY,
-              prompt: 'Bump ' + signal.dependency + ' to ' + signal.patched_versions + ' in devDependencies',
+              prompt,
               timeoutMs: 180000,
             });
             await writeFile('../workspace/intermediate/invoker.json', JSON.stringify(r));
