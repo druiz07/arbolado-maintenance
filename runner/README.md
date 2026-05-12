@@ -5,16 +5,21 @@ Sin dependencia del producto (`arbolado-app`). Solo orquestación:
 | Carpeta | Estado | Para qué |
 |---|---|---|
 | `policy-engine/` | ✅ Sem 1 | AST validator de `package.json` (5 funciones + entry point + helpers Aider). Sin LLM, sin red. Testeable local. **70 tests.** |
-| `playbook-loader/` | ✅ Sem 2 parcial 1 | Parser + validador de los YAMLs canónicos (`trigger`/`classifier`/`constraints`/`execution`). Forma normalizada que loop.yml consume. **45 tests.** |
-| `aider-invoker/` | ✅ Sem 2 parcial 2 | Invoker de Aider headless 0.86.2 con flags estrictos (`--no-stream`/`--yes`/`--map-tokens 0`/`--edit-format diff`) + input slicing + `--model-settings-file` para temperatura. **38 tests mocked + 1 smoke gated por `AIDER_SMOKE=1`.** |
-| `session-report/` | ✅ Sem 2 parcial 3 | Builder + writer del JSON estructurado (11 campos obligatorios incluyendo `failure_stage`). Path determinista `<YYYY-MM-DD>/<playbook-id>-<short-hash-12>.json`, idempotente, escritura atómica. **71 tests.** |
-| `scripts/cli/` | ✅ Sem 2 parcial 3 | 4 thin orchestrators consumidos por `loop.yml` (`load-playbook`, `policy-validate`, `enforce-max-diff`, `build-and-write-report`). Sin tests propios — cubiertos por tests de los módulos que invocan. |
-| `fixtures/` | ✅ Sem 2 parcial 3 | `sample-signal.json` para smoke real apply-playbooks. |
-| `classifier/` | ⏳ Sem 3 (plan en arbolado-app) | Cliente Gemini 2.5 Flash + prompt + regla top-2 margin ≥ 0.15 + `classify_confidence_min` del playbook ganador. Plan: `docs/superpowers/plans/2026-05-10-g5-sem3-classifier-cron.md` (Tasks 1-6). |
-| `signal-loader/` | ⏳ Sem 3 (plan en arbolado-app) | Cliente REST de Cloudflare KV (list/get/put paginado) + dedup `signal_seen:<hash>` con TTL 30d. Plan: mismo fichero (Tasks 7-11). |
-| `router/` | — Sem 4 | Health scoring de proveedores LLM (Groq/Gemini/OpenRouter) — `pr_merge_rate`, `failure_stage`, latencia. Resolverá alias informales (`groq/kimi-k2`) consultando `GET /v1/models`. |
+| `playbook-loader/` | ✅ Sem 2 parcial 1 | Parser + validador de los YAMLs canónicos. Forma normalizada que loop.yml consume. **45 tests.** |
+| `aider-invoker/` | ✅ Sem 2 parcial 2 | Invoker de Aider headless 0.86.2 con flags estrictos. **38 tests mocked + 1 smoke gated por `AIDER_SMOKE=1`.** |
+| `session-report/` | ✅ Sem 2 parcial 3 | Builder + writer del JSON estructurado (11 campos obligatorios incluyendo `failure_stage`). Path determinista, idempotente, escritura atómica. **71 tests.** |
+| `classifier/` | ✅ Sem 3 + Sem 4 C | Cliente Gemini 2.5 Flash con structured output + top-2 margin ≥ 0.15. **Sem 4 C parametrizó `model`** (default Flash, router puede pasar Pro). **31 + 2 tests mocked + 1 smoke gated por `CLASSIFIER_SMOKE=1`.** |
+| `signal-loader/` | ✅ Sem 3 | Cliente REST de Cloudflare KV (list/get/put paginado) + dedup `signal_seen:<hash>` con TTL 30d. **16 tests.** |
+| `update-merge/` | ✅ Sem 4 B (TD-8) | `findReportBySignalHash` + `updateReportPrMerged` para el feedback loop `pr-merged-listener.yml`. Idempotencia estricta. **5 tests.** |
+| `preconditions/` | ✅ Sem 4 C (TD-1) | `checkDepExists({packageJson, depName, depType})` — verifica AST de `package.json` ANTES de invocar Aider. Si la dep del signal no existe, el step `Check dep precondition (TD-1)` escribe un `policy.json` sintético con violation `precondition_dep_missing` y exit 1 → invoke-aider se salta. **9 tests.** |
+| `health-scorer/` | ✅ Sem 4 C | `computeHealthMetrics(reports, {nowIso, windowDays=14, minSamples=5})` — agrega session reports en ventana móvil 14d → `{insufficient_data, total_reports_in_window, pr_merge_rate, failure_stages, per_playbook}`. Conservador: necesita >5 closed reports para activar router. **7 tests.** |
+| `router/` | ✅ Sem 4 C | `routeClassifierModel` (escala a Gemini Pro si `classifier_failure_rate > 0.30`) + `routeInvokerModel` (promptVariant=`conservative` si `policy_failure_rate > 0.50`). **Limitación temporal:** `router.invoker.model` queda IGNORADO por loop.yml hasta Sesión A — emite `groq/kimi-k2` (alias del YAML que no resuelve). Solo `invoker.promptVariant` se consume por ahora. **7 tests.** |
+| `alias-resolver/` | ⏳ Sem 4 A | Cliente `GET /v1/models` Groq + Gemini para resolver alias informales (`groq/kimi-k2` → `groq/llama-3.3-70b-versatile`). Cuando se cierre, el router pasa a gobernar `AIDER_MODEL` también. |
+| `ast-equivalence/` | ⏳ Sem 4 D | Para playbooks `critical: true`: corre Aider 2× con seeds distintas y valida AST-equivalencia de los diffs. Latente sin playbook critical activo. |
+| `scripts/cli/` | ✅ Sem 2-4 | 10 thin orchestrators consumidos por `loop.yml` (`load-playbook`, `policy-validate`, `enforce-max-diff`, `build-and-write-report`, `load-next-signal`, `classify-signal`, `mark-signal-seen`, `update-session-report-on-merge`, `check-dep-exists`, `route-models`). |
+| `fixtures/` | ✅ Sem 2 parcial 3 | `sample-signal.json` para smoke real. |
 
-**Suite total runner: 251/251 verde** (~2.2 s con `npm test`). **Smoke real apply-playbooks validado** vía `workflow_dispatch` el 2026-05-10 — pipeline E2E corre, comportamiento defensivo confirmado por policy engine.
+**Suite total runner: 328 pass / 1 skip / 0 fail** (~2.2 s con `npm test`). **Smokes E2E validados:** Sem 2/3 happy-path, Sem 4 B feedback loop, **Sem 4 C TD-1 mitigation** (`gh run 25757868927`, 2026-05-12) — `Route models` step verifica `insufficient_data: true` → defaults; `Check dep precondition` falla con eslint-not-in-package-json → Aider skipped → report `failure_stage='policy'` con violation `precondition_dep_missing`.
 
 ## Cómo correr los tests
 
