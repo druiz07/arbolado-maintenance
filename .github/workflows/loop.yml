@@ -237,14 +237,53 @@ jobs:
           echo success > ../workspace/state/load-signal.outcome
         continue-on-error: true
 
-      - name: Classify signal → playbook (Gemini 2.5 Flash, top-2 margin ≥ 0.15)
+      # ---------- 1.b Route models (health-driven, Sem 4 router) ----------
+      # Lee TODOS los session reports en docs/auto-maintenance/session-reports/,
+      # computa métricas de salud (ventana 14d), y decide classifier model +
+      # invoker promptVariant. Si insufficient_data (<6 reports cerrados),
+      # devuelve defaults — no afecta producción. Cuando se acumule data,
+      # activa automáticamente:
+      #   - classifier escala a gemini-2.5-pro si classifier_failure_rate > 0.30
+      #   - invoker promptVariant=conservative si policy_failure_rate > 0.50
+      # NOTA: en v1 hardcodeamos bump-devdep-cve.yaml como playbook input al
+      # router (sólo hay 1 playbook activo). Cuando entre el 2º playbook, este
+      # step debe re-diseñarse para correr en 2 fases (classifier-routing antes
+      # de classify; invoker-routing después de load-playbook).
+      # NOTA: el invoker.model que devuelve el router queda IGNORADO de momento
+      # — el AIDER_MODEL sigue hardcoded en el step `Invoke Aider` con
+      # groq/llama-3.3-70b-versatile hasta que Sesión A resuelva aliases
+      # (groq/kimi-k2 del playbook YAML no es un modelo real). Sólo se usa
+      # `invoker.promptVariant` por ahora.
+      - name: Route models (Sem 4 router, health-driven)
+        id: route-models
+        if: steps.load-signal.outputs.has-signal == 'true'
+        working-directory: runner
+        run: |
+          node scripts/cli/route-models.mjs \
+            ../docs/auto-maintenance/playbooks/bump-devdep-cve.yaml \
+            > ../workspace/intermediate/routing.json
+          cat ../workspace/intermediate/routing.json | jq .
+          CLASSIFIER_MODEL=$(jq -r '.classifier.model' ../workspace/intermediate/routing.json)
+          INVOKER_PROMPT_VARIANT=$(jq -r '.invoker.promptVariant' ../workspace/intermediate/routing.json)
+          INSUFFICIENT=$(jq -r '.health.insufficient_data' ../workspace/intermediate/routing.json)
+          echo "classifier_model=$CLASSIFIER_MODEL" >> $GITHUB_OUTPUT
+          echo "invoker_prompt_variant=$INVOKER_PROMPT_VARIANT" >> $GITHUB_OUTPUT
+          echo "insufficient_data=$INSUFFICIENT" >> $GITHUB_OUTPUT
+        continue-on-error: true
+
+      - name: Classify signal → playbook (router-driven model, top-2 margin ≥ 0.15)
         id: classify
         if: steps.load-signal.outputs.has-signal == 'true'
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         working-directory: runner
         run: |
+          MODEL='${{ steps.route-models.outputs.classifier_model }}'
+          # Fallback defensivo si route-models falló silenciosamente.
+          if [ -z "$MODEL" ] || [ "$MODEL" = "null" ]; then MODEL='gemini-2.5-flash'; fi
+          echo "classifier model = $MODEL (insufficient_data=${{ steps.route-models.outputs.insufficient_data }})"
           node scripts/cli/classify-signal.mjs \
+            --model "$MODEL" \
             ../workspace/intermediate/signal.json \
             ../docs/auto-maintenance/playbooks/ \
             > ../workspace/intermediate/classifier.json
@@ -318,11 +357,18 @@ jobs:
         continue-on-error: true
 
       # ---------- 4. Invocar Aider ----------
+      # AIDER_PROMPT_VARIANT viene del step Route models (Sem 4 router). Default
+      # canonical. Si data muestra policy_failure_rate > 0.50, el router fuerza
+      # 'conservative' (añade un párrafo final reforzando "si dudas, no toques").
+      # AIDER_MODEL sigue hardcoded en groq/llama-3.3-70b-versatile hasta
+      # Sesión A (alias resolution). El router.invoker.model queda IGNORADO
+      # temporalmente.
       - name: Invoke Aider
         id: invoke-aider
         if: steps.snapshot-before.outcome == 'success' && steps.dep-precondition.outcome == 'success'
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          AIDER_PROMPT_VARIANT: ${{ steps.route-models.outputs.invoker_prompt_variant || 'canonical' }}
         working-directory: runner
         run: |
           node --input-type=module -e "
@@ -331,7 +377,8 @@ jobs:
             const pb = JSON.parse(await readFile('../workspace/intermediate/playbook.json','utf8'));
             const signal = JSON.parse(await readFile('../workspace/intermediate/signal.json','utf8'));
             const section = signal.dependency_type === 'dev' ? 'devDependencies' : 'dependencies';
-            const prompt = [
+            const promptVariant = process.env.AIDER_PROMPT_VARIANT || 'canonical';
+            const baseLines = [
               \`Objetivo: bumpear la dependencia '\${signal.dependency}' en \${section} de package.json a la versión segura \${signal.patched_versions}.\`,
               '',
               'REGLAS ESTRICTAS (cumplir todas):',
@@ -342,7 +389,16 @@ jobs:
               '- NO hagas major bump aunque la nueva versión lo permita.',
               '',
               'Devuelve SOLO el diff de package.json.',
-            ].join('\n');
+            ];
+            const conservativeTail = [
+              '',
+              'MODO CONSERVATIVE (router-activated por policy_failure_rate>0.50):',
+              '- Si AMBIGÜEDAD en cualquier regla anterior → NO modifiques nada y termina con éxito.',
+              \`- Verifica DOS veces que '\${signal.dependency}' aparece textualmente en \${section} antes de tocarla.\`,
+              '- NO uses heurísticas de naming similar (ej. no asumas que \"react-dom\" cubre \"react\").',
+            ];
+            const prompt = (promptVariant === 'conservative' ? [...baseLines, ...conservativeTail] : baseLines).join('\n');
+            console.error('aider prompt variant = ' + promptVariant);
             const r = await invokeAider({
               playbook: pb,
               signal,

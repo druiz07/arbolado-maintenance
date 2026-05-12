@@ -36,6 +36,17 @@ test('callGeminiFlash POST a la URL correcta con apiKey en querystring', async (
   assert.match(captured.url, /\?key=KEY123/);
 });
 
+test('callGeminiFlash usa el param `model` en la URL (router-driven escalation)', async () => {
+  let captured;
+  const fetchFn = makeFetchMock({
+    body: VALID_RESPONSE_BODY,
+    captureCall: (c) => { captured = c; },
+  });
+  await callGeminiFlash({ prompt: 'test', apiKey: 'k', model: 'gemini-2.5-pro', fetchFn });
+  assert.match(captured.url, /gemini-2\.5-pro:generateContent/);
+  assert.doesNotMatch(captured.url, /gemini-2\.5-flash/);
+});
+
 test('callGeminiFlash body contiene contents + generationConfig con responseSchema', async () => {
   let captured;
   const fetchFn = makeFetchMock({

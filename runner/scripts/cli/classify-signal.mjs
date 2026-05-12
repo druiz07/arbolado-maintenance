@@ -9,9 +9,19 @@ import path from 'node:path';
 import { load as parseYaml } from 'js-yaml';
 import { classifySignal } from '../../classifier/index.js';
 
-const [signalPath, playbooksDir] = process.argv.slice(2);
+// Args posicionales: <signal.json> <playbooks-dir>. Flag opcional: --model <id>.
+// El router (Sem 4) pasa --model gemini-2.5-pro cuando escala el classifier;
+// por defecto es gemini-2.5-flash (compat con Sem 3).
+const args = process.argv.slice(2);
+let model;
+const modelIdx = args.indexOf('--model');
+if (modelIdx !== -1) {
+  model = args[modelIdx + 1];
+  args.splice(modelIdx, 2);
+}
+const [signalPath, playbooksDir] = args;
 if (!signalPath || !playbooksDir) {
-  console.error('Usage: classify-signal.mjs <signal.json> <playbooks-dir>');
+  console.error('Usage: classify-signal.mjs [--model <id>] <signal.json> <playbooks-dir>');
   process.exit(2);
 }
 const apiKey = process.env.GEMINI_API_KEY;
@@ -36,7 +46,7 @@ const playbooks = await Promise.all(
   }),
 );
 
-const decision = await classifySignal({ signal, playbooks, apiKey });
+const decision = await classifySignal({ signal, playbooks, apiKey, model });
 const out = decision.ok
   ? { ok: true, playbookId: decision.playbookId, margin: decision.margin, confidence: decision.confidence, top1: decision.top1, top2: decision.top2, rankings: decision.rankings, usage: decision.usage }
   : { ok: false, reason: decision.reason, playbookHint: decision.playbookHint, top1: decision.top1, top2: decision.top2, margin: decision.margin, rankings: decision.rankings, usage: decision.usage };

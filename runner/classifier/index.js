@@ -15,13 +15,15 @@ export { applyTopTwoMargin } from './threshold.js';
  * @param {object} args.signal
  * @param {Array<{id, description, classifierRules, classifyConfidenceMin, marginThreshold}>} args.playbooks
  * @param {string} args.apiKey — GEMINI_API_KEY
+ * @param {string} [args.model] — default 'gemini-2.5-flash'; el router (Sem 4)
+ *   puede pasar 'gemini-2.5-pro' cuando classifier_failure_rate > 0.30
  * @param {typeof globalThis.fetch} [args.fetchFn]
  * @param {AbortSignal} [args.signalAbort]
  * @returns {Promise<object>} decisión final (ok|reason + metadata)
  */
-export async function classifySignal({ signal, playbooks, apiKey, fetchFn, signalAbort }) {
+export async function classifySignal({ signal, playbooks, apiKey, model, fetchFn, signalAbort }) {
   const prompt = buildClassifierPrompt(signal, playbooks);
-  const raw = await callGeminiFlash({ prompt, apiKey, fetchFn, signalAbort });
+  const raw = await callGeminiFlash({ prompt, apiKey, model, fetchFn, signalAbort });
   const parsed = parseGeminiResponse(raw);
   const decision = applyTopTwoMargin(parsed.rankings, playbooks);
   return { ...decision, usage: parsed.usage, rankings: parsed.rankings };

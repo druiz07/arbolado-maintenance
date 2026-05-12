@@ -39,6 +39,24 @@ function makeFetchMockReturning(rankings) {
   }), { status: 200, headers: { 'content-type': 'application/json' } });
 }
 
+test('classifySignal propaga `model` al client (router-driven escalation)', async () => {
+  let capturedUrl;
+  const fetchFn = async (url) => {
+    capturedUrl = url;
+    return new Response(JSON.stringify({
+      candidates: [{
+        content: { parts: [{ text: JSON.stringify({ rankings: [{ playbook_id: 'bump-devdep-cve', confidence: 0.9 }] }) }] },
+        finishReason: 'STOP',
+      }],
+      usageMetadata: { totalTokenCount: 100 },
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  await classifySignal({
+    signal: SIGNAL, playbooks: PLAYBOOKS, apiKey: 'k', model: 'gemini-2.5-pro', fetchFn,
+  });
+  assert.match(capturedUrl, /gemini-2\.5-pro:generateContent/);
+});
+
 test('classifySignal integración happy path', async () => {
   const fetchFn = makeFetchMockReturning([
     { playbook_id: 'bump-devdep-cve', confidence: 0.92 },

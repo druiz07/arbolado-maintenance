@@ -1,6 +1,7 @@
 import { ClassifierApiError } from './errors.js';
 
-const ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+const DEFAULT_MODEL = 'gemini-2.5-flash';
+const ENDPOINT_PREFIX = 'https://generativelanguage.googleapis.com/v1beta/models';
 
 const RESPONSE_SCHEMA = {
   type: 'object',
@@ -21,17 +22,20 @@ const RESPONSE_SCHEMA = {
 };
 
 /**
- * Llama a Gemini 2.5 Flash con structured output (JSON schema constrained decoding).
+ * Llama a Gemini con structured output (JSON schema constrained decoding).
+ * Modelo por defecto: gemini-2.5-flash. El router puede pasar gemini-2.5-pro
+ * cuando classifier_failure_rate > 0.30 (escalación a modelo más capaz).
  * @param {object} args
  * @param {string} args.prompt
  * @param {string} args.apiKey — Google AI Studio API key
+ * @param {string} [args.model] — default 'gemini-2.5-flash'
  * @param {typeof globalThis.fetch} [args.fetchFn]
  * @param {AbortSignal} [args.signalAbort]
  * @returns {Promise<object>} body crudo de la response Gemini
  * @throws {ClassifierApiError} en status no-2xx
  */
-export async function callGeminiFlash({ prompt, apiKey, fetchFn = globalThis.fetch, signalAbort }) {
-  const url = `${ENDPOINT}?key=${encodeURIComponent(apiKey)}`;
+export async function callGeminiFlash({ prompt, apiKey, model = DEFAULT_MODEL, fetchFn = globalThis.fetch, signalAbort }) {
+  const url = `${ENDPOINT_PREFIX}/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
   const body = {
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     generationConfig: {
