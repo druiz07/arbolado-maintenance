@@ -273,10 +273,40 @@ jobs:
           echo success > workspace/state/snapshot-before.outcome
         continue-on-error: true
 
+      # ---------- 3.b Pre-Aider: dep_exists precondition (TD-1 mitigation) ----------
+      # Mitiga el patrón TD-1 (Aider añade dep nueva en vez de bumpearla cuando
+      # la dep no está aún en package.json). Si la dep del signal no existe en
+      # la sección esperada, el CLI escribe un policy.json sintético con
+      # violation `precondition_dep_missing` y exit 1 → invoke-aider se salta
+      # y el report final registra failure_stage=policy con la violation real.
+      - name: Check dep precondition (TD-1)
+        id: dep-precondition
+        if: steps.snapshot-before.outcome == 'success'
+        working-directory: runner
+        run: |
+          set +e
+          node scripts/cli/check-dep-exists.mjs \
+            ../workspace/intermediate/signal.json \
+            ../workspace/intermediate/package.before.json \
+            ../workspace/intermediate/policy.json \
+            > ../workspace/intermediate/precondition.json
+          OK=$(jq -r '.ok' ../workspace/intermediate/precondition.json)
+          if [ "$OK" = "true" ]; then
+            echo "✓ precondition pass — dep está en la sección esperada"
+            echo success > ../workspace/state/dep-precondition.outcome
+            exit 0
+          else
+            echo "✗ precondition failed — invoke-aider se salta, report registra failure_stage=policy"
+            cat ../workspace/intermediate/precondition.json
+            echo failure > ../workspace/state/dep-precondition.outcome
+            exit 1
+          fi
+        continue-on-error: true
+
       # ---------- 4. Invocar Aider ----------
       - name: Invoke Aider
         id: invoke-aider
-        if: steps.snapshot-before.outcome == 'success'
+        if: steps.snapshot-before.outcome == 'success' && steps.dep-precondition.outcome == 'success'
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
         working-directory: runner
