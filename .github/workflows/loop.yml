@@ -248,12 +248,11 @@ jobs:
       # router (sólo hay 1 playbook activo). Cuando entre el 2º playbook, este
       # step debe re-diseñarse para correr en 2 fases (classifier-routing antes
       # de classify; invoker-routing después de load-playbook).
-      # NOTA: el invoker.model que devuelve el router queda IGNORADO de momento
-      # — el AIDER_MODEL viene del step `Resolve model alias` que lee el alias
-      # del playbook YAML directamente (Sem 4 Sesión A — TD-7). Sólo se usa
-      # `invoker.promptVariant` del router por ahora. Commit posterior puede
-      # cambiar resolve-model para leer del router output (invoker_model) en
-      # vez del playbook.
+      # router.invoker.model y router.invoker.promptVariant se consumen ambos
+      # downstream: invoker_model → resolve-model (que lo resuelve a un id real
+      # vía /v1/models antes de Invoke Aider); invoker_prompt_variant →
+      # Invoke Aider directamente. Si el router falla silenciosamente
+      # (continue-on-error true), resolve-model cae al primary del playbook.
       - name: Route models (Sem 4 router, health-driven)
         id: route-models
         if: steps.load-signal.outputs.has-signal == 'true'
@@ -264,9 +263,11 @@ jobs:
             > ../workspace/intermediate/routing.json
           cat ../workspace/intermediate/routing.json | jq .
           CLASSIFIER_MODEL=$(jq -r '.classifier.model' ../workspace/intermediate/routing.json)
+          INVOKER_MODEL=$(jq -r '.invoker.model' ../workspace/intermediate/routing.json)
           INVOKER_PROMPT_VARIANT=$(jq -r '.invoker.promptVariant' ../workspace/intermediate/routing.json)
           INSUFFICIENT=$(jq -r '.health.insufficient_data' ../workspace/intermediate/routing.json)
           echo "classifier_model=$CLASSIFIER_MODEL" >> $GITHUB_OUTPUT
+          echo "invoker_model=$INVOKER_MODEL" >> $GITHUB_OUTPUT
           echo "invoker_prompt_variant=$INVOKER_PROMPT_VARIANT" >> $GITHUB_OUTPUT
           echo "insufficient_data=$INSUFFICIENT" >> $GITHUB_OUTPUT
         continue-on-error: true
@@ -313,21 +314,28 @@ jobs:
         continue-on-error: true
 
       # ---------- 2b. Resolve model alias (Sem 4 Sesión A — TD-7) ----------
-      # Lee el alias informal del playbook (ej. `groq/kimi-k2`) y lo resuelve a
-      # un model id real disponible en Groq/Gemini consultando GET /v1/models.
-      # Si el alias ya es real (e.g. `groq/llama-3.3-70b-versatile`),
+      # Lee el invoker.model que decidió el router (que hoy coincide con el
+      # primary del playbook, pero puede divergir si el router escala). Lo
+      # resuelve a un model id real disponible en Groq/Gemini consultando
+      # GET /v1/models. Si el alias ya es real (e.g. `groq/llama-3.3-70b-versatile`),
       # passthrough con `mappedFrom=null`. Si no resuelve (provider down, 401,
-      # modelo no disponible), continue-on-error=false → Invoke Aider se salta
-      # (failure_stage=invoker en el report).
+      # modelo no disponible), Invoke Aider se salta (failure_stage=invoker).
+      # Fallback defensivo: si route-models falló silenciosamente, leemos el
+      # primary del playbook directamente.
       - name: Resolve model alias (TD-7)
         id: resolve-model
         if: steps.load-playbook.outcome == 'success'
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ROUTER_INVOKER_MODEL: ${{ steps.route-models.outputs.invoker_model }}
         working-directory: runner
         run: |
-          ALIAS=$(jq -r '.execution.model_strategy.primary' ../workspace/intermediate/playbook.json)
+          ALIAS="$ROUTER_INVOKER_MODEL"
+          if [ -z "$ALIAS" ] || [ "$ALIAS" = "null" ]; then
+            echo "router output empty — falling back to playbook primary"
+            ALIAS=$(jq -r '.execution.model_strategy.primary' ../workspace/intermediate/playbook.json)
+          fi
           node scripts/cli/resolve-alias.mjs "$ALIAS" > ../workspace/intermediate/resolved-model.json
           cat ../workspace/intermediate/resolved-model.json | jq .
           RESOLVED=$(jq -r '.resolved' ../workspace/intermediate/resolved-model.json)
