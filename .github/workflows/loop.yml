@@ -137,10 +137,9 @@ jobs:
       pull-requests: write
     env:
       ARBOLADO_APP_REPO: druiz07/arbolado-app
-      AIDER_MODEL: groq/llama-3.3-70b-versatile
-      # TODO Sem 4 (router): resolver alias del playbook (groq/kimi-k2 → modelo
-      # disponible en la cuenta) listando GET /v1/models. Spec: arranque-plan.md
-      # §"Hallazgos del smoke real 2026-05-10".
+      # AIDER_MODEL ya no se hardcodea — viene del step `Resolve model alias`
+      # (TD-7 cerrado en Sem 4 Sesión A). Si ese step falla, Invoke Aider falla
+      # también — diseño deliberado: sin resolver no hay model id real.
     steps:
       # ---------- 1. Infra ----------
       - name: Checkout runner repo
@@ -250,10 +249,11 @@ jobs:
       # step debe re-diseñarse para correr en 2 fases (classifier-routing antes
       # de classify; invoker-routing después de load-playbook).
       # NOTA: el invoker.model que devuelve el router queda IGNORADO de momento
-      # — el AIDER_MODEL sigue hardcoded en el step `Invoke Aider` con
-      # groq/llama-3.3-70b-versatile hasta que Sesión A resuelva aliases
-      # (groq/kimi-k2 del playbook YAML no es un modelo real). Sólo se usa
-      # `invoker.promptVariant` por ahora.
+      # — el AIDER_MODEL viene del step `Resolve model alias` que lee el alias
+      # del playbook YAML directamente (Sem 4 Sesión A — TD-7). Sólo se usa
+      # `invoker.promptVariant` del router por ahora. Commit posterior puede
+      # cambiar resolve-model para leer del router output (invoker_model) en
+      # vez del playbook.
       - name: Route models (Sem 4 router, health-driven)
         id: route-models
         if: steps.load-signal.outputs.has-signal == 'true'
@@ -312,6 +312,35 @@ jobs:
           echo success > ../workspace/state/load-playbook.outcome
         continue-on-error: true
 
+      # ---------- 2b. Resolve model alias (Sem 4 Sesión A — TD-7) ----------
+      # Lee el alias informal del playbook (ej. `groq/kimi-k2`) y lo resuelve a
+      # un model id real disponible en Groq/Gemini consultando GET /v1/models.
+      # Si el alias ya es real (e.g. `groq/llama-3.3-70b-versatile`),
+      # passthrough con `mappedFrom=null`. Si no resuelve (provider down, 401,
+      # modelo no disponible), continue-on-error=false → Invoke Aider se salta
+      # (failure_stage=invoker en el report).
+      - name: Resolve model alias (TD-7)
+        id: resolve-model
+        if: steps.load-playbook.outcome == 'success'
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        working-directory: runner
+        run: |
+          ALIAS=$(jq -r '.execution.model_strategy.primary' ../workspace/intermediate/playbook.json)
+          node scripts/cli/resolve-alias.mjs "$ALIAS" > ../workspace/intermediate/resolved-model.json
+          cat ../workspace/intermediate/resolved-model.json | jq .
+          RESOLVED=$(jq -r '.resolved' ../workspace/intermediate/resolved-model.json)
+          if [ -z "$RESOLVED" ] || [ "$RESOLVED" = "null" ]; then
+            echo "✗ alias resolution failed (resolved=null)"
+            echo failure > ../workspace/state/resolve-model.outcome
+            exit 1
+          fi
+          echo "alias=$ALIAS → resolved=$RESOLVED"
+          echo "resolved=$RESOLVED" >> $GITHUB_OUTPUT
+          echo success > ../workspace/state/resolve-model.outcome
+        continue-on-error: true
+
       # ---------- 3. Pre-Aider: snapshot del package.json ----------
       # NOTA: arbolado-app no tiene package.json en root — vive en electron-app/.
       # Smoke real 2026-05-10 reveló esta asunción rota. Si en el futuro otro
@@ -320,7 +349,7 @@ jobs:
       # que existe).
       - name: Snapshot package.json antes de Aider
         id: snapshot-before
-        if: steps.load-playbook.outcome == 'success'
+        if: steps.resolve-model.outcome == 'success'
         run: |
           cp app/electron-app/package.json workspace/intermediate/package.before.json
           echo success > workspace/state/snapshot-before.outcome
@@ -360,14 +389,17 @@ jobs:
       # AIDER_PROMPT_VARIANT viene del step Route models (Sem 4 router). Default
       # canonical. Si data muestra policy_failure_rate > 0.50, el router fuerza
       # 'conservative' (añade un párrafo final reforzando "si dudas, no toques").
-      # AIDER_MODEL sigue hardcoded en groq/llama-3.3-70b-versatile hasta
-      # Sesión A (alias resolution). El router.invoker.model queda IGNORADO
-      # temporalmente.
+      # AIDER_MODEL viene del step Resolve model alias (Sem 4 Sesión A — TD-7):
+      # el playbook declara `groq/kimi-k2` (alias informal) y el resolver lo
+      # mapea a un model id real disponible en la cuenta. router.invoker.model
+      # sigue ignorado de momento — commit posterior puede cambiar resolve-model
+      # para leer del router en vez del playbook.
       - name: Invoke Aider
         id: invoke-aider
         if: steps.snapshot-before.outcome == 'success' && steps.dep-precondition.outcome == 'success'
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          AIDER_MODEL: ${{ steps.resolve-model.outputs.resolved }}
           AIDER_PROMPT_VARIANT: ${{ steps.route-models.outputs.invoker_prompt_variant || 'canonical' }}
         working-directory: runner
         run: |
