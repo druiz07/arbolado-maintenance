@@ -10,6 +10,12 @@
 # loader es esta copia, así que es la load-bearing. La canónica en arbolado-app
 # queda desincronizada hasta TD-10 (resync canónica vía PR cross-repo).
 #
+# 2026-05-14 (Sem 4 Sesión A cierre): el bloque `execution.model_strategy` SÍ
+# se sincronizó con el canónico — ambos archivos declaran ahora
+# `groq/openai/gpt-oss-120b` como primary (sustituye el `groq/kimi-k2` retirado
+# por Groq). Drift TD-10 RESTANTE: `aider.prompt` + `pre_aider_steps.depExistsCheck`
+# + ejemplos clasificador. Resync completa sigue diferida a próxima sesión cross-repo.
+#
 # Históricas:
 # - 2026-05-09 (Sem 1): primera copia tras Sesión 0 — hash idéntico al canónico.
 # - 2026-05-12 (Sem 4 Sesión C): drift voluntario — ver TD-10.
@@ -114,16 +120,16 @@ constraints:
 
 execution:
   model_strategy:
-    # TODO Sem 4 (router LLM): `groq/kimi-k2` es alias informal. El smoke real
-    # del 2026-05-10 confirmó que en Groq Cloud free tier no existe ningún
-    # modelo Kimi K2 disponible para la cuenta del usuario (ni alias antiguo
-    # ni `kimi-k2-instruct-0905`). El router debe consultar
-    # https://api.groq.com/openai/v1/models al inicio y resolver alias →
-    # modelo real disponible (p.ej. `groq/llama-3.3-70b-versatile` como
-    # primary actual, validado con smoke real 2026-05-10 — coste $0.0015 / 6s).
-    primary: groq/kimi-k2
-    fallback: google/gemini-2.5-flash
-    backup: openrouter/free
+    # Refactor 2026-05-14 (Sem 4 Sesión A cierre): Kimi K2 era un modelo real
+    # de Moonshot AI, pero Groq lo retiró del catálogo. El primary anterior
+    # `groq/kimi-k2` ya no resolvía. Sustituido por GPT OSS 120B (máxima
+    # capacidad para corner cases de edits package.json) con Scout como
+    # fallback rápido. El alias-resolver (runner/alias-resolver/) valida estos
+    # IDs contra GET /v1/models al arrancar el job — si Groq jubila alguno,
+    # el smoke falla con AliasNotFoundError + la lista real de availableModels.
+    primary: groq/openai/gpt-oss-120b
+    fallback: groq/meta-llama/llama-4-scout-17b-16e-instruct
+    backup: groq/llama-3.3-70b-versatile
   pre_aider_steps:
     - resolveSafeVersion:
         input: { dep: signal.dependency, range: signal.patched_versions }

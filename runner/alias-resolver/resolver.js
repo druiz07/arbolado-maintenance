@@ -1,10 +1,16 @@
 import { AliasNotFoundError } from './errors.js';
 
-const KNOWN_ALIASES = {
-  'groq/kimi-k2': 'groq/llama-3.3-70b-versatile',
-  'google/gemini-2.5-flash': 'gemini/gemini-2.5-flash',
-  'google/gemini-2.5-pro': 'gemini/gemini-2.5-pro',
-};
+// Tabla intencionalmente VACIA tras el refactor 2026-05-14. El resolver opera
+// en modo "passthrough verificado": valida que el ID del playbook exista en la
+// lista real de modelos del provider (consultada via GET /v1/models). Si en el
+// futuro un provider jubila un modelo y necesitamos un mote temporal, esta
+// tabla es el hook — pero el patron por defecto debe ser "el playbook declara
+// IDs reales que el provider sirve hoy".
+//
+// Historico: hasta 2026-05-14 mapeaba `groq/kimi-k2 -> groq/llama-3.3-70b-versatile`
+// porque Kimi K2 (modelo real de Moonshot AI) fue retirado de Groq. Esa entrada
+// se elimina al actualizar el playbook canonico a `groq/openai/gpt-oss-120b`.
+const KNOWN_ALIASES = {};
 
 export function resolveModelAlias(alias, { groqModels, geminiModels }) {
   const mapped = KNOWN_ALIASES[alias] || alias;
