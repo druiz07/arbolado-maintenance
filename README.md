@@ -35,13 +35,14 @@ Stack 0 € — Aider + Groq Kimi K2 + Gemini Flash + Cloudflare Workers + GH Ac
 | **Sem 3** — classifier real Gemini Flash con top-2 margin ≥ 0.15 + activar cron horario | ✅ 2026-05-10 |
 | **Sem 4 Sesión B** — feedback loop `update-on-merge` (TD-8): notify→dispatch→listener→update-merge | ✅ 2026-05-11 |
 | **Sem 4 Sesión C** — TD-1 estructural (preconditions/dep-exists) + health-scorer + router + Task 12 wire en `loop.yml` | ✅ 2026-05-12 |
-| **Sem 4 Sesión A** — alias resolution (TD-7): consultar `GET /v1/models` de Groq+Gemini para resolver `groq/kimi-k2`→ID real | ⏳ siguiente |
-| **Sem 4 Sesiones D/E** — double-run AST (latente sin playbook critical) + cierre formal | ⏳ tras A |
+| **Sem 4 Sesión A** — alias resolution (TD-7): `runner/alias-resolver/` + step `Resolve model alias` en `loop.yml`; `AIDER_MODEL` ahora router-driven sin hardcoded fallback | ✅ 2026-05-14 |
+| **Sem 4 Sesiones D/E** — double-run AST (latente sin playbook critical) + cierre formal | ⏳ tras D |
 
 **Smokes E2E validados:**
 - Sem 2 + Sem 3 happy-path: `gh run 25634323138` (2026-05-10) y `gh run 25639705586` (cron horario activado).
 - Sem 4 B (TD-8 feedback loop): smoke 2026-05-11 con `pr_merged: null→false` propagado vía `repository_dispatch`.
-- **Sem 4 C (TD-1 + router):** `gh run 25757868927` (2026-05-12). Pipeline corre: `Route models` → classifier (Gemini Flash, `insufficient_data: true → defaults`) → `Check dep precondition (TD-1)` → eslint NO en `package.json` → Aider skipped → report `failure_stage='policy'` con violation `precondition_dep_missing`. PR correctamente NO abierto. **Ahorro de tokens y latencia de Aider en cada signal cuya dep no exista.**
+- Sem 4 C (TD-1 + router): `gh run 25757868927` (2026-05-12). Pipeline corre: `Route models` → classifier (Gemini Flash, `insufficient_data: true → defaults`) → `Check dep precondition (TD-1)` → eslint NO en `package.json` → Aider skipped → report `failure_stage='policy'` con violation `precondition_dep_missing`. PR correctamente NO abierto.
+- **Sem 4 A (TD-7 alias):** `gh run 25865491279` (2026-05-14). Step nuevo `Resolve model alias (TD-7)` consumió `invoker_model=groq/kimi-k2` del router output, lo mapeó a `groq/llama-3.3-70b-versatile` real, y el `Invoke Aider` lo usó como `AIDER_MODEL`. Resto del pipeline igual que Sem 4 C (precondition falla con eslint → Aider skipped). **El `AIDER_MODEL` ya no se hardcodea en el env del job; viene del router 100%.**
 
 ## Dónde vive el diseño
 
@@ -169,23 +170,25 @@ El job `apply-playbooks` corre en cron horario activo desde 2026-05-10. Cada hor
 2. **route-models** (Sem 4 C) lee health metrics + decide modelo+promptVariant,
 3. classifier (Gemini Flash o Pro según router) elige playbook con top-2 margin ≥ 0.15,
 4. **check-dep-precondition** (Sem 4 C, TD-1) bloquea si la dep no existe en `package.json`,
-5. Aider hace el bump (modelo según router pero hoy hardcoded `groq/llama-3.3-70b-versatile` hasta Sesión A),
-6. policy AST + enforce-max-diff + CI tests/build + write report,
-7. abre PR `auto:dry-run` sólo si `failure_stage='none'`,
-8. marca signal como visto con TTL 30d.
+5. **resolve-model** (Sem 4 A, TD-7) toma el `invoker_model` del router output (alias informal `groq/kimi-k2`) y lo resuelve a un model id real consultando `/v1/models` de Groq/Gemini → emite `AIDER_MODEL` para `Invoke Aider`,
+6. Aider hace el bump usando ese model id real,
+7. policy AST + enforce-max-diff + CI tests/build + write report,
+8. abre PR `auto:dry-run` sólo si `failure_stage='none'`,
+9. marca signal como visto con TTL 30d.
 
-## Pendiente — Sem 4 Sesión A (siguiente)
+## Pendiente — Sem 4 Sesión D (latente)
 
-> **Plan detallado:** `arbolado-app:docs/superpowers/plans/2026-05-11-g5-sem4-router-llm.md` Tasks 1-5 (Sesión A). ~2 h.
+> **Plan detallado:** `arbolado-app:docs/superpowers/plans/2026-05-11-g5-sem4-router-llm.md` Tasks 13-15 (Sesión D). ~2.5 h.
 
-Resolver el alias `groq/kimi-k2` (informal en el playbook YAML) consultando `GET /v1/models` de Groq y Gemini en runtime. Tras esa sesión, un commit pequeño extra en `loop.yml` cambia `AIDER_MODEL: groq/llama-3.3-70b-versatile` (hardcoded) por `${{ steps.route-models.outputs.invoker_model }}` (router-driven, ya resuelto). Hasta entonces, el router decide modelo del invoker pero loop.yml IGNORA esa decisión deliberadamente.
+Implementar modo double-run AST equivalence en `runner/ast-equivalence/`: para playbooks `constraints.critical: true` (el primer candidato sería `rollback-on-build-failure.yaml`), correr Aider 2× con seeds distintas, comparar diffs por AST. Si difieren, abortar. **Latente** porque ningún playbook activo declara `critical: true` aún — diferido a H.1/H.4 cuando el primer playbook crítico lo demande.
 
 ```
-runner/alias-resolver/                 # 5 ficheros (errors, groq-models, gemini-models, resolver, index)
-                                       # + 4 test files
-runner/scripts/cli/                    # +1 CLI: alias-resolver helper
-.github/workflows/loop.yml             # 1 cambio: AIDER_MODEL hardcoded → router-driven
+runner/ast-equivalence/                # compareJsonAst + tests
+runner/scripts/cli/double-run-aider.mjs
+.github/workflows/loop.yml             # branching: si playbook critical → double-run-aider.mjs
 ```
+
+Tras Sesión D, **Sesión E** (~30 min) hace el cierre formal: consolida bloque Sem 4 en `arranque-plan.md`, marca TD-7/TD-1/TD-8 ya cerrados en tabla y deja la fase G.5 lista para pasar a H.4.
 
 ## Desarrollo local
 
