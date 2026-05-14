@@ -141,3 +141,8 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Local workspace for snapshots, scratch data, dataset captures with sensitive
+# info (Dependabot snapshots contain paths + versions of open vulnerabilities).
+# NEVER commit. See docs/superpowers/plans/2026-05-11-g5-sem4-router-llm.md §F.
+workspace/
