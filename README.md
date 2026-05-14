@@ -36,13 +36,16 @@ Stack 0 € — Aider + Groq Kimi K2 + Gemini Flash + Cloudflare Workers + GH Ac
 | **Sem 4 Sesión B** — feedback loop `update-on-merge` (TD-8): notify→dispatch→listener→update-merge | ✅ 2026-05-11 |
 | **Sem 4 Sesión C** — TD-1 estructural (preconditions/dep-exists) + health-scorer + router + Task 12 wire en `loop.yml` | ✅ 2026-05-12 |
 | **Sem 4 Sesión A** — alias resolution (TD-7): `runner/alias-resolver/` + step `Resolve model alias` en `loop.yml`; `AIDER_MODEL` ahora router-driven sin hardcoded fallback | ✅ 2026-05-14 |
-| **Sem 4 Sesiones D/E** — double-run AST (latente sin playbook critical) + cierre formal | ⏳ tras D |
+| **Refactor post-Sesión-A** — `KNOWN_ALIASES` vaciada (Kimi K2 era modelo real de Moonshot retirado por Groq, no un mote); playbook cambió a `groq/openai/gpt-oss-120b` real | ✅ 2026-05-14 |
+| **Sem 4 Sesión F** — validación con dataset real Dependabot (~3 h, añadida tras refactor para validar el modelo nuevo empíricamente) | ⏳ lista, datos existen |
+| **Sem 4 Sesiones D/E** — double-run AST (latente sin playbook critical) + cierre formal | ⏳ tras D + F |
 
 **Smokes E2E validados:**
 - Sem 2 + Sem 3 happy-path: `gh run 25634323138` (2026-05-10) y `gh run 25639705586` (cron horario activado).
 - Sem 4 B (TD-8 feedback loop): smoke 2026-05-11 con `pr_merged: null→false` propagado vía `repository_dispatch`.
 - Sem 4 C (TD-1 + router): `gh run 25757868927` (2026-05-12). Pipeline corre: `Route models` → classifier (Gemini Flash, `insufficient_data: true → defaults`) → `Check dep precondition (TD-1)` → eslint NO en `package.json` → Aider skipped → report `failure_stage='policy'` con violation `precondition_dep_missing`. PR correctamente NO abierto.
 - **Sem 4 A (TD-7 alias):** `gh run 25865491279` (2026-05-14). Step nuevo `Resolve model alias (TD-7)` consumió `invoker_model=groq/kimi-k2` del router output, lo mapeó a `groq/llama-3.3-70b-versatile` real, y el `Invoke Aider` lo usó como `AIDER_MODEL`. Resto del pipeline igual que Sem 4 C (precondition falla con eslint → Aider skipped). **El `AIDER_MODEL` ya no se hardcodea en el env del job; viene del router 100%.**
+- **Refactor post-Sesión-A:** `gh run 25870531196` (2026-05-14, mismo día). Playbook canónico ahora declara IDs reales de Groq (`groq/openai/gpt-oss-120b` primary). El resolver pasa el ID por `mappedFrom: null` — passthrough verificado contra `/v1/models` sin necesidad de tabla de motes. Output del step: `"resolved": "groq/openai/gpt-oss-120b"`.
 
 ## Dónde vive el diseño
 
