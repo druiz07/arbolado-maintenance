@@ -616,8 +616,13 @@ jobs:
       # Issue en arbolado-app si el override no fue efectivo por rango estricto
       # del paquete padre (edge_case parent_strict_range del playbook). El
       # orquestador ya restauró package.json/lockfile vía rollback.
+      # NOTA: NO gatear por steps.apply-override.outcome — ese step es
+      # continue-on-error y sale 0 aun con status=rolled_back, así que su
+      # outcome es siempre 'success'. El gate correcto es la PRESENCIA del
+      # fichero: el wrapper apply-override.mjs escribe override-issue.json
+      # SOLO en rolled_back:npm_install (edge_case parent_strict_range).
       - name: Open parent_strict_range issue (TD-12)
-        if: steps.apply-override.outcome == 'failure' && hashFiles('workspace/intermediate/override-issue.json') != ''
+        if: always() && hashFiles('workspace/intermediate/override-issue.json') != ''
         env:
           GH_TOKEN: ${{ secrets.GH_PAT_ARBOLADO_APP }}
         run: |
