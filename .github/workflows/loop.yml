@@ -227,7 +227,12 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
-          export SIGNAL='{"source":"worker","dependency":"nanoid","current_version":"3.3.6","vulnerable_versions":"<3.3.8","patched_versions":">=3.3.8","severity":"moderate","is_transitive":true,"dependency_type":"runtime","path":"electron-app/package-lock.json","advisory_id":"GHSA-td12-override-smoke","detected_at":"2026-05-15T15:00:00Z","signal_version":1}'
+          # patched_versions == version YA instalada en el arbol (nanoid@3.3.11):
+          # el override resultante es idempotente -> npm install no altera el
+          # arbol -> valida el camino FELIZ completo (applied -> PR) sin romper
+          # el arbol de Electron. El smoke previo (>=3.3.8) validó el camino de
+          # FALLO (npm install rompe -> rollback -> issue): ambos extremos cubiertos.
+          export SIGNAL='{"source":"worker","dependency":"nanoid","current_version":"3.3.11","vulnerable_versions":"<3.3.11","patched_versions":">=3.3.11","severity":"moderate","is_transitive":true,"dependency_type":"runtime","path":"electron-app/package-lock.json","advisory_id":"GHSA-td12-override-smoke","detected_at":"2026-05-15T15:00:00Z","signal_version":1}'
           SIGNAL_HASH=$(node --input-type=module -e "
             import { generateSignalHash } from './runner/session-report/signal-hash.js';
             process.stdout.write(generateSignalHash(JSON.parse(process.env.SIGNAL)));
