@@ -197,3 +197,46 @@ test('runOverridePlaybook: lockfile inexistente no rompe el snapshot', async () 
   assert.equal(r.status, 'applied');
   assert.ok(JSON.parse(fs.get(pkgAbs)).overrides['nth-check']);
 });
+
+// Regresión TD-12: el smoke real (gh run 25929781995) reveló ENOENT —
+// npm corría en repoDir (raíz) pero el package.json de arbolado-app vive
+// en electron-app/. npm install/audit/test/build deben ejecutarse en el
+// DIRECTORIO del package.json, no en la raíz del repo.
+test('runOverridePlaybook: npm corre en el dir del package.json (subdir)', async () => {
+  const pkgAbs = '/repo/electron-app/package.json';
+  const cwds = [];
+  const { io } = makeIo({
+    files: { [pkgAbs]: JSON.stringify({ name: 'app', devDependencies: { svgo: '^1' } }, null, 2) },
+    runImpl: (cmd, opts) => {
+      cwds.push(opts && opts.cwd);
+      return cmd === 'npm audit --json'
+        ? { code: 0, stdout: cleanAudit, stderr: '' }
+        : { code: 0, stdout: '', stderr: '' };
+    },
+  });
+  const r = await runOverridePlaybook({ signal: okSignal, repoDir: '/repo', io });
+  assert.equal(r.status, 'applied');
+  assert.ok(cwds.length >= 1, 'debe haber ejecutado npm');
+  for (const c of cwds) {
+    assert.equal(c, '/repo/electron-app', `npm debe correr en el subdir del package.json, no en ${c}`);
+  }
+});
+
+test('runOverridePlaybook: package.json en raíz → npm corre en repoDir', async () => {
+  const pkgAbs = '/repo/package.json';
+  const cwds = [];
+  const { io } = makeIo({
+    files: { [pkgAbs]: JSON.stringify({ name: 'root' }, null, 2) },
+    runImpl: (cmd, opts) => {
+      cwds.push(opts && opts.cwd);
+      return cmd === 'npm audit --json'
+        ? { code: 0, stdout: cleanAudit, stderr: '' }
+        : { code: 0, stdout: '', stderr: '' };
+    },
+  });
+  const r = await runOverridePlaybook({ signal: { ...okSignal, path: 'package-lock.json' }, repoDir: '/repo', io });
+  assert.equal(r.status, 'applied');
+  for (const c of cwds) {
+    assert.equal(c, '/repo', `package.json en raíz → cwd debe ser repoDir, no ${c}`);
+  }
+});

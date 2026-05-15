@@ -58,6 +58,13 @@ export async function runOverridePlaybook({ signal, repoDir, io, maxDiffLines = 
   const lockRel = siblingLockPath(pkgRel);
   const pkgAbs = joinRepo(repoDir, pkgRel);
   const lockAbs = joinRepo(repoDir, lockRel);
+  // npm install/audit/test/build deben ejecutarse en el DIRECTORIO del
+  // package.json, no en repoDir: arbolado-app no tiene package.json en raíz
+  // (vive en electron-app/). Bug detectado por el smoke real TD-12
+  // (gh run 25929781995: ENOENT app/package.json). Para package.json en
+  // raíz, pkgDirRel === '' → cwd = repoDir.
+  const pkgDirRel = pkgRel.replace(/\\/g, '/').replace(/\/?package\.json$/, '');
+  const pkgDir = pkgDirRel ? joinRepo(repoDir, pkgDirRel) : repoDir;
 
   // Snapshot de texto para rollback fiel (preserva formato original).
   const pkgText = await io.readFile(pkgAbs);
@@ -96,14 +103,14 @@ export async function runOverridePlaybook({ signal, repoDir, io, maxDiffLines = 
   await io.writeFile(pkgAbs, serialized);
 
   // npm install (regenera lockfile)
-  const install = await io.run('npm install', { cwd: repoDir });
+  const install = await io.run('npm install', { cwd: pkgDir });
   if (install.code !== 0) {
     await restoreSnapshot({ io, snapshot });
     return { status: 'rolled_back', stage: 'npm_install', operation, targetVersion, detail: install.stderr };
   }
 
   // required_checks: npm audit (la advisory concreta debe desaparecer)
-  const auditRun = await io.run('npm audit --json', { cwd: repoDir });
+  const auditRun = await io.run('npm audit --json', { cwd: pkgDir });
   let auditJson;
   try {
     auditJson = JSON.parse(auditRun.stdout || '{}');
@@ -122,12 +129,12 @@ export async function runOverridePlaybook({ signal, repoDir, io, maxDiffLines = 
   }
 
   // required_checks: npm test, npm run build
-  const testRun = await io.run('npm test', { cwd: repoDir });
+  const testRun = await io.run('npm test', { cwd: pkgDir });
   if (testRun.code !== 0) {
     await restoreSnapshot({ io, snapshot });
     return { status: 'rolled_back', stage: 'tests', operation, targetVersion };
   }
-  const buildRun = await io.run('npm run build', { cwd: repoDir });
+  const buildRun = await io.run('npm run build', { cwd: pkgDir });
   if (buildRun.code !== 0) {
     await restoreSnapshot({ io, snapshot });
     return { status: 'rolled_back', stage: 'build', operation, targetVersion };
