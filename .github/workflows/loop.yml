@@ -139,6 +139,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      issues: write   # TD-12: issue parent_strict_range en el propio repo
     env:
       ARBOLADO_APP_REPO: druiz07/arbolado-app
       # AIDER_MODEL ya no se hardcodea — viene del step `Resolve model alias`
@@ -621,21 +622,26 @@ jobs:
       # outcome es siempre 'success'. El gate correcto es la PRESENCIA del
       # fichero: el wrapper apply-override.mjs escribe override-issue.json
       # SOLO en rolled_back:npm_install (edge_case parent_strict_range).
+      # El issue se abre en el PROPIO repo arbolado-maintenance (no en
+      # arbolado-app): el PAT GH_PAT_ARBOLADO_APP no tiene scope Issues
+      # (smoke 25928638152: "Resource not accessible by personal access
+      # token (createIssue)"). Ampliar el PAT cross-repo sería una decisión
+      # de credenciales de Daniel; el robot se mantiene autocontenido usando
+      # GITHUB_TOKEN sobre su propio tracker (con permissions issues:write a
+      # nivel job). El body referencia arbolado-app y la dep afectada.
       - name: Open parent_strict_range issue (TD-12)
         if: always() && hashFiles('workspace/intermediate/override-issue.json') != ''
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT_ARBOLADO_APP }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           TITLE=$(jq -r '.title' workspace/intermediate/override-issue.json)
           BODY=$(jq -r '.body' workspace/intermediate/override-issue.json)
-          # Sin --label: 'auto:maintenance' no existe en arbolado-app y
-          # gh issue create aborta entero si el label no existe (smoke
-          # 25928518752 lo evidenció). El prefijo "[auto-maintenance]" del
-          # título es suficiente para triage; no creamos labels cross-repo.
+          # Sin --label: no dependemos de que exista un label concreto; el
+          # prefijo "[auto-maintenance]" del título basta para triage.
           gh issue create \
-            --repo "$ARBOLADO_APP_REPO" \
+            --repo "${{ github.repository }}" \
             --title "$TITLE" \
-            --body "$BODY" || echo 'issue create failed — manual review needed'
+            --body "$BODY (repo afectado: $ARBOLADO_APP_REPO)" || echo 'issue create failed — manual review needed'
         continue-on-error: true
 
       # ---------- 8. Componer y escribir el session report ----------
