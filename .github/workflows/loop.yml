@@ -628,11 +628,14 @@ jobs:
         run: |
           TITLE=$(jq -r '.title' workspace/intermediate/override-issue.json)
           BODY=$(jq -r '.body' workspace/intermediate/override-issue.json)
+          # Sin --label: 'auto:maintenance' no existe en arbolado-app y
+          # gh issue create aborta entero si el label no existe (smoke
+          # 25928518752 lo evidenció). El prefijo "[auto-maintenance]" del
+          # título es suficiente para triage; no creamos labels cross-repo.
           gh issue create \
             --repo "$ARBOLADO_APP_REPO" \
             --title "$TITLE" \
-            --body "$BODY" \
-            --label auto:maintenance || echo 'issue create failed — manual review needed'
+            --body "$BODY" || echo 'issue create failed — manual review needed'
         continue-on-error: true
 
       # ---------- 8. Componer y escribir el session report ----------
