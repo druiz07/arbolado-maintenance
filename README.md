@@ -38,6 +38,7 @@ Stack 0 € — Aider + Groq Kimi K2 + Gemini Flash + Cloudflare Workers + GH Ac
 | **Sem 4 Sesión A** — alias resolution (TD-7): `runner/alias-resolver/` + step `Resolve model alias` en `loop.yml`; `AIDER_MODEL` ahora router-driven sin hardcoded fallback | ✅ 2026-05-14 |
 | **Refactor post-Sesión-A** — `KNOWN_ALIASES` vaciada (Kimi K2 era modelo real de Moonshot retirado por Groq, no un mote); playbook cambió a `groq/openai/gpt-oss-120b` real | ✅ 2026-05-14 |
 | **Sem 4 Sesión F** — validación con dataset real Dependabot (~3 h): módulo `runner/dependabot/` + 2 CLIs + dry-run batch sobre 59 alertas (open + fixed) | ✅ 2026-05-14 — hallazgos abstractos abajo |
+| **P1 (TD-11)** — playbook nuevo `bump-transitive-via-overrides` (cierra el gap del 70 % transitives): `runner/overrides/` determinista sin Aider + CLI offline. Adelanto proactivo (disparador ≥10 open NO cumplido) | ✅ 2026-05-15 — **NO cableado en `loop.yml` aún (TD-12)** |
 | **Sem 4 Sesiones D/E** — double-run AST (latente sin playbook critical) + cierre formal | ⏳ tras D |
 
 **Smokes E2E validados:**
@@ -47,6 +48,7 @@ Stack 0 € — Aider + Groq Kimi K2 + Gemini Flash + Cloudflare Workers + GH Ac
 - **Sem 4 A (TD-7 alias):** `gh run 25865491279` (2026-05-14). Step nuevo `Resolve model alias (TD-7)` consumió `invoker_model=groq/kimi-k2` del router output, lo mapeó a `groq/llama-3.3-70b-versatile` real, y el `Invoke Aider` lo usó como `AIDER_MODEL`. Resto del pipeline igual que Sem 4 C (precondition falla con eslint → Aider skipped). **El `AIDER_MODEL` ya no se hardcodea en el env del job; viene del router 100%.**
 - **Refactor post-Sesión-A:** `gh run 25870531196` (2026-05-14, mismo día). Playbook canónico ahora declara IDs reales de Groq (`groq/openai/gpt-oss-120b` primary). El resolver pasa el ID por `mappedFrom: null` — passthrough verificado contra `/v1/models` sin necesidad de tabla de motes. Output del step: `"resolved": "groq/openai/gpt-oss-120b"`.
 - **Sem 4 Sesión F (validación dataset real):** sin smoke E2E nuevo (la sesión es análisis offline). Pipeline determinista corrió sobre 59 alertas Dependabot del repo `arbolado-app` (open + fixed); 71 % cayó en `precondition_dep_missing` (transitives no presentes en `package.json` direct), 29 % pasaría a Aider pero **el conjunto que pasaría es 1 sola dep** (electron, distintos advisory_ids ya fixed). Hallazgo principal: el bottleneck del flujo Dependabot real NO es la calidad del LLM — es el **scope del único playbook activo** (sólo cubre direct deps con patch). La validación empírica del modelo nuevo (gpt-oss-120b) vs anterior queda diferida hasta volver a tener ≥10 signals open con direct deps procesables. Detalle (deps concretas) NO commiteado por seguridad — vive en `workspace/F5-propuesta-2026-05-14.md` (gitignored).
+- **P1 / TD-11 (2026-05-15):** sin smoke E2E nuevo (offline, playbook aún no cableado en `loop.yml` — TD-12). CLI determinista `override-dry-run` corrió el orquestador `runner/overrides/` sobre el mismo dataset histórico de 59 signals → **42 `applied`** (las transitives que eran el 71 % `precondition_fail` con `bump-devdep-cve`, ahora cubiertas vía `package.json#overrides`) + **17 `skipped:not_transitive`** (direct → siguen siendo de `bump-devdep-cve`; coexistencia disjunta confirmada), 0 rolled_back / 0 blocked. Suite runner **363 → 412 pass / 1 skip** (+49 tests TDD `overrides/`). Smoke E2E real pendiente de cablear el playbook (TD-12).
 
 ## Dónde vive el diseño
 
@@ -125,8 +127,10 @@ El diseño completo está en **`druiz07/arbolado-app`** (privado, requiere acces
     │   ├── README.md
     │   ├── bump-devdep-cve.yaml       # ⚠ DRIFT 2026-05-12 vs canónico (TD-10): refinado en
     │   │                              #   Sem 4 C con depExistsCheck + prompt explícito
+    │   ├── bump-transitive-via-overrides.yaml # ✅ P1 2026-05-15 (TD-11): transitives vía
+    │   │                              #   package.json#overrides, sin Aider; NO cableado (TD-12)
     │   ├── fix-tests-minor-version-bump.yaml
-    │   ├── rollback-on-build-failure.yaml     # critical: true
+    │   ├── rollback-on-build-failure.yaml     # critical: true (documental, no activo)
     │   └── lint-prettier-autofix.yaml
     └── session-reports/               # ✅ alimentado por el bot + actualizado por el listener
         └── <YYYY-MM-DD>/<playbook-id>-<short-hash-12>.json

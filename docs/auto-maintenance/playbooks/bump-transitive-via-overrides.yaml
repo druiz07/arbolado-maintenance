@@ -1,0 +1,210 @@
+# Playbook NUEVO — P1 / TD-11 (Sesión F propuso, esta sesión implementa).
+#
+# Caso de uso: alerta Dependabot sobre una dependencia TRANSITIVA (aparece en
+# package-lock.json pero NO en dependencies/devDependencies direct). El playbook
+# activo `bump-devdep-cve` NO la cubre — su precondición `depExistsCheck` la
+# descarta (no está en package.json direct) → 71 % de las alertas reales caían
+# en precondition_fail (ver Sesión F, dataset 2026-05-14).
+#
+# Diferencias clave vs. bump-devdep-cve:
+# - Trigger: is_transitive == true (mutuamente excluyente con bump-devdep-cve,
+#   que opera sobre direct deps; coexistencia segura — ver nota classifier).
+# - SIN Aider / SIN LLM — script Node determinista (model_strategy: none, como
+#   rollback-on-build-failure.yaml).
+# - Acción: insertar/actualizar package.json#overrides[dep] = patched_version,
+#   `npm install` (regenera lockfile), validar con `npm audit`.
+# - version_rules permite major: el fix de una transitiva a veces exige un major
+#   del propio paquete transitivo; el riesgo se acota con ROLLBACK si build/test
+#   o audit fallan (no con prohibición previa).
+#
+# RELACIÓN DE FICHEROS:
+# - Esta copia (arbolado-maintenance/docs/auto-maintenance/playbooks/) es la
+#   LOAD-BEARING: el loader del runner la carga en runtime.
+# - Réplica en arbolado-proyecto/docs/auto-maintenance/playbooks/ como spec
+#   canónico del proyecto. Mantener ambas sincronizadas (no driftar sin TD).
+# - Origen del diseño: workspace/F5-propuesta-2026-05-14.md (gitignored) §P1.
+#
+# COEXISTENCIA CON bump-devdep-cve (evita conflicto de precedencia):
+#   bump-devdep-cve  → is_transitive == false (direct dev dep con patch)
+#   bump-transitive  → is_transitive == true  (transitiva vía overrides)
+# Son disjuntos por naturaleza de la dep. Aunque el classifier LLM puntuara
+# ambos, la precondición `depExistsCheck` de bump-devdep-cve ya filtra las
+# transitivas, así que NO hay doble ejecución. Riesgo residual (margin < 0.15
+# si el classifier puntúa ambos parecido) documentado en TD-10/TD-11: la
+# resync cross-repo añadirá `is_transitive: false` explícito al classifier de
+# bump-devdep-cve. No se modifica bump-devdep-cve en esta sesión (evita drift).
+
+id: bump-transitive-via-overrides
+version: 1
+description: >
+  Mitiga CVEs en dependencias TRANSITIVAS fijando package.json#overrides a la
+  versión parcheada y regenerando el lockfile con npm install. Determinista,
+  sin Aider. Rollback si build/test/audit fallan.
+
+trigger:
+  type: dependabot_alert | custom_worker
+  signal_schema:
+    type: object
+    required:
+      - source
+      - dependency
+      - severity
+      - current_version
+      - patched_versions
+      - is_transitive
+      - path
+    properties:
+      source:
+        type: string
+        enum: [dependabot, dependabot-cli, snyk, worker]
+      dependency:
+        type: string
+      current_version:
+        type: string
+      vulnerable_versions:
+        type: string
+      patched_versions:
+        type: string
+      severity:
+        type: string
+        enum: [low, moderate, high, critical]
+      is_transitive:
+        type: boolean
+      dependency_type:
+        type: string
+        enum: [dev, runtime]
+      path:
+        type: string
+      advisory_id:
+        type: string
+      context:
+        type: object
+        properties:
+          parent_dependency:
+            type: string
+            nullable: true
+          fix_available:
+            type: boolean
+
+classifier:
+  model: gemini-2.5-flash
+  temperature: 0.1
+  top_p: 0.9
+  margin_threshold: 0.15
+  prompt: |
+    Eres un clasificador de señales para mantenimiento automático.
+    Mapea la señal a un playbook. Responde SOLO en JSON:
+    {
+      "playbook_id": "...",
+      "confidence": 0.0-1.0
+    }
+    Reglas para "bump-transitive-via-overrides":
+    - Usa este playbook SOLO si:
+      - is_transitive == true
+      - Existe patched_versions (no null)
+    - Si is_transitive == false → NO seleccionar este playbook
+      (esa es direct dep → "bump-devdep-cve").
+    - Si no hay patched_versions → confidence bajo (no hay versión a fijar).
+
+constraints:
+  allowed_paths:
+    - package.json
+    - package-lock.json
+    - "**/package.json"
+    - "**/package-lock.json"
+  forbidden_paths:
+    - electron-app/src/main/**
+    - electron-app/src/preload/**
+  allowed_operations:
+    - add_override
+    - bump_override
+    - regenerate_lockfile
+  forbidden_operations:
+    - remove_dependency
+    - add_dependency
+    - bump_version
+    - change_scripts
+    - modify_engines
+  version_rules:
+    # A diferencia de bump-devdep-cve, un fix de transitiva puede requerir
+    # major del propio paquete transitivo. Se permite, acotado por rollback.
+    allowed_range_changes:
+      - patch
+      - minor
+      - major
+    forbid_major_bumps: false
+    forbid_range_widening: false
+  # Sólo cuenta el diff de package.json (la entrada overrides: ~1-5 líneas).
+  # El package-lock.json lo REGENERA `npm install` (no es edición manual) →
+  # excluido del conteo por el módulo runner/overrides (ver enforceMaxDiff).
+  max_diff_lines: 80
+  required_checks:
+    - npm test
+    - npm run build
+    - npm audit
+  retry_limit: 1            # determinista — reintentar no aporta
+  cooldown_minutes: 30
+  classify_confidence_min: 0.85
+  critical: false           # transitivas dev/runtime mitigadas; rollback acota
+
+execution:
+  model_strategy:
+    primary: none           # SIN LLM — script Node puro
+    fallback: none
+    backup: none
+  pre_aider_steps:
+    - dedupCheck:
+        key: "signal_seen:{{signal_hash}}"
+        on_hit: skip_duplicate_signal
+    - transitiveCheck:
+        input: { is_transitive: signal.is_transitive }
+        on_false: edge_case.not_transitive
+    - patchedVersionCheck:
+        input: { patched_versions: signal.patched_versions }
+        on_null: edge_case.no_patch_available
+  # No hay sección `aider`. El executor es runner/overrides (script determinista).
+  overrides:
+    manifest_from: signal.path          # ej. electron-app/package-lock.json
+    dependency: signal.dependency
+    # target_version = primera versión parcheada exacta (strip ">=" del rango)
+    target_from: signal.patched_versions
+    branch_name: "auto/override-{{signal.dependency}}-{{signal_hash}}"
+    pr_title: "[AUTO-DRY-RUN][override] {{signal.dependency}} -> {{target_version}} (transitive CVE)"
+    pr_body: |
+      Dependencia transitiva vulnerable: {{signal.dependency}} ({{signal.severity}})
+      Advisory: {{signal.advisory_id}}
+      Fijada vía package.json#overrides a {{target_version}}.
+      Lockfile regenerado por `npm install`. `npm audit` post-fix limpio.
+
+      Rollback automático si build/test/audit fallaban (no es el caso aquí).
+      Mitigación automática — revisar y mergear si procede.
+  post_aider_steps:
+    - enforceMaxDiff:
+        max: constraints.max_diff_lines
+        scope: package.json_only        # excluye package-lock.json regenerado
+        on_exceed: block_diff_size_exceeded
+
+postconditions:
+  require_tests_pass: true
+  require_build_pass: true
+  require_audit_clean: true             # `npm audit` ya NO reporta la advisory
+  on_failure:
+    action: rollback_then_issue
+    reason: "override_failed_validation"
+
+edge_cases:
+  not_transitive:
+    action: skip
+    reason: "wrong_playbook_use_bump_devdep_cve"
+  no_patch_available:
+    action: open_issue
+    reason: "no_patched_version_to_pin"
+  override_breaks_build:
+    action: rollback_then_issue
+    reason: "override_broke_build_or_tests"
+  audit_still_vulnerable:
+    action: rollback_then_issue
+    reason: "npm_audit_still_reports_advisory_after_override"
+  parent_strict_range:
+    action: open_issue
+    reason: "parent_pins_vulnerable_range_override_ineffective"
