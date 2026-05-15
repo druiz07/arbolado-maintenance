@@ -24,6 +24,10 @@ on:
         description: 'Sembrar signal:sem3-smoke-task12 en KV antes del job (debug E2E).'
         type: boolean
         default: false
+      seed_transitive_signal:
+        description: 'TD-12: sembrar signal transitive (override path) en KV antes del job (smoke E2E).'
+        type: boolean
+        default: false
 
 # Opt-in temprano al runtime Node 24 para JS-based actions.
 # A partir de 2026-06-02 GitHub lo fuerza por defecto; lo activamos antes para validar
@@ -209,6 +213,39 @@ jobs:
           jq . /tmp/seed-response.json
           echo "✓ seeded signal:sem3-smoke-task12 in KV"
 
+      # ---------- 1b-bis. (Debug TD-12) Sembrar signal transitive ----------
+      # Smoke E2E del flujo override: una transitiva benigna y ubicua (nanoid)
+      # fijada a una versión publicada válida. Ejercita routing → apply-override
+      # → npm install/audit/test/build → report → PR auto:dry-run. El advisory_id
+      # es sintético: npm audit no lo reporta → auditClean=dependency_absent →
+      # status=applied (valida el cableado, no la resolución de un CVE real).
+      # Hash computado dinámicamente (robusto a cambios de campos, a diferencia
+      # del hash hardcodeado del seed de arriba).
+      - name: Seed transitive signal in KV (debug TD-12)
+        if: github.event_name == 'workflow_dispatch' && inputs.seed_transitive_signal == true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          export SIGNAL='{"source":"worker","dependency":"nanoid","current_version":"3.3.6","vulnerable_versions":"<3.3.8","patched_versions":">=3.3.8","severity":"moderate","is_transitive":true,"dependency_type":"runtime","path":"electron-app/package-lock.json","advisory_id":"GHSA-td12-override-smoke","detected_at":"2026-05-15T15:00:00Z","signal_version":1}'
+          SIGNAL_HASH=$(node --input-type=module -e "
+            import { generateSignalHash } from './runner/session-report/signal-hash.js';
+            process.stdout.write(generateSignalHash(JSON.parse(process.env.SIGNAL)));
+          ")
+          echo "computed signal_hash=$SIGNAL_HASH"
+          curl -fsS -X DELETE \
+            "https://api.cloudflare.com/client/v4/accounts/e4ccfa519c1e0fb94221ca6583220545/storage/kv/namespaces/212fe2e1b8874298ad44a9a906375033/values/signal_seen:$SIGNAL_HASH" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -o /tmp/seen-delete-td12.json || true
+          echo "✓ cleared signal_seen:$SIGNAL_HASH (best-effort)"
+          curl -fsS -X PUT \
+            "https://api.cloudflare.com/client/v4/accounts/e4ccfa519c1e0fb94221ca6583220545/storage/kv/namespaces/212fe2e1b8874298ad44a9a906375033/values/signal:td12-override-smoke" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H "Content-Type: text/plain" \
+            --data-raw "$SIGNAL" \
+            -o /tmp/seed-td12-response.json
+          jq . /tmp/seed-td12-response.json
+          echo "✓ seeded signal:td12-override-smoke in KV"
+
       # ---------- 2. Pipeline state machine ----------
       # Cada step escribe workspace/state/<step>.outcome con success|failure y
       # workspace/intermediate/<step>.json con su output. write-report compone
@@ -313,6 +350,29 @@ jobs:
           echo success > ../workspace/state/load-playbook.outcome
         continue-on-error: true
 
+      # ---------- 2a.bis Detect playbook kind (TD-12 routing) ----------
+      # Bifurca el pipeline según el playbook que resolvió el classifier:
+      #   - bump-transitive-via-overrides → flujo determinista `apply-override`
+      #     (runner/overrides, sin Aider/LLM). Cubre el 70 % de alertas reales
+      #     que son transitivas (gap identificado en Sesión F, cerrado en P1/TD-11).
+      #   - cualquier otro (hoy: bump-devdep-cve) → flujo Aider intacto.
+      # El gate se aplica como cláusula extra en `resolve-model` (kind=='aider'):
+      # toda la cadena Aider cascada de resolve-model.outcome, así que con
+      # kind=='override' se salta entera sin tocar sus steps internos.
+      - name: Detect playbook kind (TD-12)
+        id: detect-playbook
+        if: steps.load-playbook.outcome == 'success'
+        working-directory: runner
+        run: |
+          PB_ID=$(jq -r '.meta.id' ../workspace/intermediate/playbook.json)
+          echo "playbook_id=$PB_ID"
+          if [ "$PB_ID" = "bump-transitive-via-overrides" ]; then
+            echo "kind=override" >> $GITHUB_OUTPUT
+          else
+            echo "kind=aider" >> $GITHUB_OUTPUT
+          fi
+        continue-on-error: true
+
       # ---------- 2b. Resolve model alias (Sem 4 Sesión A — TD-7) ----------
       # Lee el invoker.model que decidió el router (que hoy coincide con el
       # primary del playbook, pero puede divergir si el router escala). Lo
@@ -324,7 +384,9 @@ jobs:
       # primary del playbook directamente.
       - name: Resolve model alias (TD-7)
         id: resolve-model
-        if: steps.load-playbook.outcome == 'success'
+        # TD-12: sólo el flujo Aider. Si el playbook es bump-transitive-via-overrides
+        # (kind=override) esta cadena entera se salta y actúa `apply-override`.
+        if: steps.load-playbook.outcome == 'success' && steps.detect-playbook.outputs.kind == 'aider'
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -523,6 +585,51 @@ jobs:
           echo success > ../../workspace/state/ci-build.outcome
         continue-on-error: true
 
+      # ---------- 7-bis. Flujo override determinista (TD-12) ----------
+      # Sólo si el classifier resolvió bump-transitive-via-overrides. Determinista,
+      # sin Aider/LLM/tokens. El wrapper apply-override.mjs inyecta IO real
+      # (fs + child_process npm) al orquestador runner/overrides y traduce el
+      # resultado a invoker.json/policy.json + outcomes ci-tests/ci-build
+      # (overrides/report-bridge.js) para que el write-report compartido componga
+      # el failure_stage SIN modificar el builder de session-report.
+      # Rollback de package.json/lockfile lo hace el propio orquestador si
+      # npm install/audit/test/build fallan; el repo target nunca queda sucio.
+      - name: Apply override (TD-12, bump-transitive-via-overrides)
+        id: apply-override
+        if: steps.load-playbook.outcome == 'success' && steps.detect-playbook.outputs.kind == 'override'
+        working-directory: runner
+        run: |
+          node scripts/cli/apply-override.mjs \
+            ../workspace/intermediate/signal.json \
+            ../app \
+            .. \
+            > ../workspace/intermediate/apply-override.json
+          cat ../workspace/intermediate/apply-override.json | jq .
+          STATUS=$(jq -r '.status' ../workspace/intermediate/apply-override.json)
+          if [ "$STATUS" = "applied" ] || [ "$STATUS" = "noop" ]; then
+            echo success > ../workspace/state/apply-override.outcome
+          else
+            echo failure > ../workspace/state/apply-override.outcome
+          fi
+        continue-on-error: true
+
+      # Issue en arbolado-app si el override no fue efectivo por rango estricto
+      # del paquete padre (edge_case parent_strict_range del playbook). El
+      # orquestador ya restauró package.json/lockfile vía rollback.
+      - name: Open parent_strict_range issue (TD-12)
+        if: steps.apply-override.outcome == 'failure' && hashFiles('workspace/intermediate/override-issue.json') != ''
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT_ARBOLADO_APP }}
+        run: |
+          TITLE=$(jq -r '.title' workspace/intermediate/override-issue.json)
+          BODY=$(jq -r '.body' workspace/intermediate/override-issue.json)
+          gh issue create \
+            --repo "$ARBOLADO_APP_REPO" \
+            --title "$TITLE" \
+            --body "$BODY" \
+            --label auto:maintenance || echo 'issue create failed — manual review needed'
+        continue-on-error: true
+
       # ---------- 8. Componer y escribir el session report ----------
       # Este step SIEMPRE corre, incluso si los anteriores fallaron.
       # El report registra el failure_stage según los outcomes acumulados.
@@ -544,15 +651,20 @@ jobs:
           STAGE=$(jq -r '.failure_stage' workspace/intermediate/report-result.json)
           git config user.name 'arbolado-maintenance-bot'
           git config user.email 'maintenance-bot@users.noreply.github.com'
+          PB=$(jq -r '.playbookId // "unknown"' workspace/intermediate/classifier.json 2>/dev/null || echo unknown)
           git add docs/auto-maintenance/session-reports/
-          git commit -m "report(g5): bump-devdep-cve $(jq -r '.dependency' workspace/intermediate/signal.json) ($STAGE)" \
+          git commit -m "report(g5): $PB $(jq -r '.dependency' workspace/intermediate/signal.json) ($STAGE)" \
             || echo 'nothing to commit (idempotency hit)'
           git push origin HEAD:main || echo 'push failed — manual review needed'
 
       # ---------- 9. Abrir PR auto:dry-run en arbolado-app (sólo si failure_stage=none) ----------
       - name: Open auto:dry-run PR in arbolado-app
         id: open-pr
-        if: always() && steps.write-report.outcome == 'success'
+        # TD-12: este PR es del flujo Aider. El override tiene su propio step
+        # (Open auto:dry-run PR (override)) — sin el gate kind=='aider' este
+        # step dispararía también para overrides y abriría un PR con rama y
+        # cuerpo de bump-devdep-cve sobre cambios de override (PR duplicado).
+        if: always() && steps.write-report.outcome == 'success' && steps.detect-playbook.outputs.kind == 'aider'
         env:
           GH_TOKEN: ${{ secrets.GH_PAT_ARBOLADO_APP }}
         working-directory: app
@@ -586,6 +698,54 @@ jobs:
             --head "$BRANCH" \
             --title "[auto:dry-run] bump $(jq -r '.dependency' ../workspace/intermediate/signal.json)" \
             --body "Generated by maintenance-loop run \`${{ github.run_id }}\`. Signal: \`${SIGNAL_HASH}...\`. Playbook: bump-devdep-cve. Failure stage: ${STAGE}." \
+            --label auto:dry-run
+
+      # ---------- 9-bis. PR auto:dry-run del flujo override (TD-12) ----------
+      # Análogo al PR de Aider pero para bump-transitive-via-overrides: la rama
+      # y el commit reflejan el playbook override y los ficheros viven en
+      # electron-app/ (package.json con la entrada overrides + package-lock.json
+      # regenerado por npm install). Label auto:dry-run SIEMPRE (contrato robot:
+      # runtime deps nunca auto-publicadas; Daniel revisa y mergea).
+      - name: Open auto:dry-run PR (override) in arbolado-app
+        id: open-pr-override
+        if: always() && steps.write-report.outcome == 'success' && steps.detect-playbook.outputs.kind == 'override'
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT_ARBOLADO_APP }}
+        working-directory: app
+        run: |
+          STAGE=$(jq -r '.failure_stage' ../workspace/intermediate/report-result.json)
+          if [ "$STAGE" != "none" ]; then
+            echo "skip PR — failure_stage=$STAGE (override no aplicado/rolled_back)"
+            exit 0
+          fi
+
+          SIGNAL_HASH=$(node --input-type=module -e "
+            import { shortSignalHash } from '../runner/session-report/index.js';
+            import { readFile } from 'node:fs/promises';
+            const s = JSON.parse(await readFile('../workspace/intermediate/signal.json','utf8'));
+            process.stdout.write(shortSignalHash(s));
+          ")
+          DEP=$(jq -r '.dependency' ../workspace/intermediate/signal.json)
+          PATCHED=$(jq -r '.patched_versions' ../workspace/intermediate/signal.json)
+          BRANCH="auto/override-${DEP}-${SIGNAL_HASH}"
+
+          git config user.name 'arbolado-maintenance-bot'
+          git config user.email 'maintenance-bot@users.noreply.github.com'
+          git checkout -B "$BRANCH"
+          # El override toca electron-app/package.json (entrada overrides) y
+          # regenera electron-app/package-lock.json vía npm install.
+          git add electron-app/package.json electron-app/package-lock.json || true
+          # --allow-empty: status=noop (ya fijado) no produce diff pero el PR
+          # sigue siendo útil como audit trail (run_id + signal hash).
+          git commit --allow-empty -m "[AUTO-DRY-RUN][playbook:bump-transitive-via-overrides] ${DEP} ${PATCHED}"
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --repo "$ARBOLADO_APP_REPO" \
+            --base main \
+            --head "$BRANCH" \
+            --title "[auto:dry-run] override transitive ${DEP}" \
+            --body "Generated by maintenance-loop run \`${{ github.run_id }}\`. Signal: \`${SIGNAL_HASH}...\`. Playbook: bump-transitive-via-overrides (determinista, sin Aider). Transitiva fijada vía package.json#overrides; lockfile regenerado; npm audit post-fix limpio. Failure stage: ${STAGE}." \
             --label auto:dry-run
 
       # ---------- 9b. Marcar signal como visto en KV (best-effort) ----------

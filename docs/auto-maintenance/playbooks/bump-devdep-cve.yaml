@@ -85,8 +85,11 @@ classifier:
     Reglas:
     - Usa "bump-devdep-cve" SOLO si:
       - dependency_type == "dev"
+      - is_transitive == false
       - Existe patched_versions
     - Si dependency_type == "runtime" → NO seleccionar este playbook
+    - Si is_transitive == true → NO seleccionar este playbook
+      (esa es transitiva → "bump-transitive-via-overrides").
     - Si no hay parche disponible → confidence bajo
 
 constraints:
