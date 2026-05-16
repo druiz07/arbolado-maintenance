@@ -15,9 +15,12 @@ name: maintenance-loop
 
 on:
   schedule:
-    # Cada hora, alineado con la cadencia de Sem 1 (validar contratos, no acción todavía).
-    # Sube/baja en Sem 2-4 según volumen real de signals.
-    - cron: '0 * * * *'
+    # Cada 30 min (L2 aceleración 2026-05-16): alineado con la cadencia del
+    # Worker productor (wrangler.toml `*/30`) para no desfasar productor/
+    # consumidor. `concurrency` (abajo) encola runs solapados (no se pierde
+    # señal). Drena el backlog ~2× más rápido que el horario previo durante
+    # la ventana de observación dry-run sin tocar guardarraíles.
+    - cron: '*/30 * * * *'
   workflow_dispatch:
     inputs:
       seed_test_signal:
@@ -26,6 +29,10 @@ on:
         default: false
       seed_transitive_signal:
         description: 'TD-12: sembrar signal transitive (override path) en KV antes del job (smoke E2E).'
+        type: boolean
+        default: false
+      seed_dependabot_backlog:
+        description: 'L1 replay dry-run: regenerar el backlog real de Dependabot de arbolado-app y sembrar TODAS las señales en KV (el cron las drena 1/run en dry-run → muchos PRs auto:dry-run). Solo dispatch manual.'
         type: boolean
         default: false
 
@@ -251,6 +258,62 @@ jobs:
             -o /tmp/seed-td12-response.json
           jq . /tmp/seed-td12-response.json
           echo "✓ seeded signal:td12-override-smoke in KV"
+
+      # L1 aceleración 2026-05-16 — replay del backlog real en dry-run.
+      # Regenera el backlog Dependabot de arbolado-app (TODOS los estados:
+      # open+fixed+dismissed → la cohorte densa que Sesión F analizó, ≈59) y
+      # siembra cada señal en KV. El cron las drena 1/run (load-next-signal),
+      # generando PRs auto:dry-run reales para que Daniel grade merge_rate en
+      # días en vez de semanas de señal orgánica escasa. SOLO workflow_dispatch
+      # — un cron normal NUNCA siembra (gate event_name == workflow_dispatch).
+      # No batchea: 1 señal/run se preserva (no toca apply-playbooks). El
+      # snapshot vive en workspace/ (gitignored — contiene rutas de vulns
+      # abiertas; .gitignore:145-148 lo cubre; NUNCA commitear). TTL 7d para
+      # sobrevivir al drenado (~59 runs ≈ 30 h a */30). Sigue dry-run: open-pr
+      # siempre etiqueta auto:dry-run y Daniel mergea/rechaza a mano.
+      - name: Seed Dependabot backlog in KV (L1 — replay dry-run)
+        if: github.event_name == 'workflow_dispatch' && inputs.seed_dependabot_backlog == true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_PAT_ARBOLADO_APP }}
+        run: |
+          set -euo pipefail
+          mkdir -p workspace
+          # Riesgo conocido: si GH_PAT_ARBOLADO_APP no tiene scope de lectura de
+          # Dependabot alerts → 403 aquí (decisión de credenciales de Daniel,
+          # análoga a la nota de scope Issues en el step de issue). set -e hace
+          # el fallo RUIDOSO a propósito: mejor parar que sembrar parcial.
+          gh api 'repos/druiz07/arbolado-app/dependabot/alerts?per_page=100' \
+            --paginate > workspace/dependabot-backlog-snapshot.json
+          node runner/scripts/cli/dependabot-to-signals.mjs \
+            workspace/dependabot-backlog-snapshot.json \
+            > workspace/dependabot-backlog-signals.json
+          COUNT=$(jq '.signals | length' workspace/dependabot-backlog-signals.json)
+          echo "backlog signals normalizadas = $COUNT (skipped: $(jq '.skipped | length' workspace/dependabot-backlog-signals.json))"
+          ACCT=e4ccfa519c1e0fb94221ca6583220545
+          NS=212fe2e1b8874298ad44a9a906375033
+          if [ "$COUNT" -eq 0 ]; then echo "Sin señales que sembrar (backlog vacío)"; exit 0; fi
+          for i in $(seq 0 $((COUNT - 1))); do
+            SIGNAL=$(jq -c ".signals[$i]" workspace/dependabot-backlog-signals.json)
+            export SIGNAL
+            HASH=$(node --input-type=module -e "
+              import { generateSignalHash } from './runner/session-report/signal-hash.js';
+              process.stdout.write(generateSignalHash(JSON.parse(process.env.SIGNAL)));
+            ")
+            # Forzar reproceso: borrar el dedup-marker (best-effort).
+            curl -fsS -X DELETE \
+              "https://api.cloudflare.com/client/v4/accounts/$ACCT/storage/kv/namespaces/$NS/values/signal_seen:$HASH" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -o /dev/null || true
+            # Sembrar con prefijo signal:replay-<hash> (load-next itera prefix
+            # signal:); TTL 7d para sobrevivir el drenado del backlog.
+            curl -fsS -X PUT \
+              "https://api.cloudflare.com/client/v4/accounts/$ACCT/storage/kv/namespaces/$NS/values/signal:replay-$HASH?expiration_ttl=604800" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H "Content-Type: text/plain" \
+              --data-raw "$SIGNAL" -o /dev/null
+            echo "  seeded signal:replay-$HASH ($((i + 1))/$COUNT)"
+          done
+          echo "✓ sembradas $COUNT señales del backlog (TTL 7d) — el cron las drenará 1/run en dry-run"
 
       # ---------- 2. Pipeline state machine ----------
       # Cada step escribe workspace/state/<step>.outcome con success|failure y
