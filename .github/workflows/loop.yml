@@ -15,15 +15,15 @@ name: maintenance-loop
 
 on:
   schedule:
-    # Cada 30 min (L2 aceleración 2026-05-16): alineado con la cadencia del
-    # Worker productor (wrangler.toml `*/30`) para no desfasar productor/
-    # consumidor. `concurrency` (abajo) encola runs solapados (no se pierde
-    # señal). Drena el backlog ~2× más rápido que el horario previo durante
-    # la ventana de observación dry-run sin tocar guardarraíles.
-    # (El */10 temporal del 2026-05-16 para drenar el backlog L1 se revirtió:
-    # el seed dio HTTP 403 — GH_PAT_ARBOLADO_APP sin scope Dependabot-alerts;
-    # bloqueado en decisión de credenciales de Daniel.)
-    - cron: '*/30 * * * *'
+    # ⚠ TEMPORAL 2026-05-16 (2º intento, PAT ya con Dependabot-alerts:Read) —
+    # DRENADO DEL BACKLOG L1: subido a */10 para vaciar el replay del backlog
+    # Dependabot (~59 señales) en ~8-12 h desatendido. `concurrency` (abajo)
+    # serializa runs → sin riesgo de corrupción. OBLIGATORIO REVERTIR a
+    # '*/30 * * * *' (cadencia real de producción, alineada con el Worker
+    # wrangler.toml */30) cuando el backlog esté drenado (load-next-signal →
+    # no-signal varios runs seguidos / no aparecen PRs auto:dry-run nuevos).
+    # Ver memoria project_mantenimiento_autonomo_h4 (tarea prioritaria).
+    - cron: '*/10 * * * *'
   workflow_dispatch:
     inputs:
       seed_test_signal:
