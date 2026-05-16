@@ -75,7 +75,7 @@ El diseño completo está en **`druiz07/arbolado-app`** (privado, requiere acces
 │   │                                  #   - test-runner (cron + push)
 │   │                                  #   - test-worker
 │   │                                  #   - observe-signals (cron + push, KV listing)
-│   │                                  #   - apply-playbooks (cron horario activo desde Sem 3;
+│   │                                  #   - apply-playbooks (cron */30 desde 2026-05-16, horario Sem 3→2026-05-16;
 │   │                                  #     pipeline: load-signal → route-models (Sem 4 C) →
 │   │                                  #     classify (router-driven model) → load-playbook →
 │   │                                  #     snapshot-before → check-dep-precondition (Sem 4 C, TD-1) →
@@ -173,9 +173,14 @@ npm test
 # Y borra el signal_seen:<hash> previo (sin esto el dedup hace skip).
 gh workflow run maintenance-loop --repo druiz07/arbolado-maintenance -f seed_test_signal=true
 gh run watch <run-id> --repo druiz07/arbolado-maintenance --exit-status
+
+# L1 aceleración: replay del backlog real de Dependabot en dry-run.
+# Regenera TODAS las alertas de arbolado-app y las siembra en KV; el cron
+# las drena 1/run → muchos PRs auto:dry-run reales para gradar merge_rate.
+gh workflow run maintenance-loop --repo druiz07/arbolado-maintenance -f seed_dependabot_backlog=true
 ```
 
-El job `apply-playbooks` corre en cron horario activo desde 2026-05-10. Cada hora:
+El job `apply-playbooks` corre en cron `*/30` (cada 30 min) desde 2026-05-16 (antes horario desde 2026-05-10; L2 aceleración, alineado con el Worker `*/30`). Cada ejecución:
 1. lee KV (`signal:*`), salta los ya marcados (`signal_seen:<hash>`),
 2. **route-models** (Sem 4 C) lee health metrics + decide modelo+promptVariant,
 3. classifier (Gemini Flash o Pro según router) elige playbook con top-2 margin ≥ 0.15,
