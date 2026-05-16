@@ -177,8 +177,18 @@ gh run watch <run-id> --repo druiz07/arbolado-maintenance --exit-status
 # L1 aceleración: replay del backlog real de Dependabot en dry-run.
 # Regenera TODAS las alertas de arbolado-app y las siembra en KV; el cron
 # las drena 1/run → muchos PRs auto:dry-run reales para gradar merge_rate.
+# Requiere que GH_PAT_ARBOLADO_APP tenga permiso Dependabot alerts: Read.
 gh workflow run maintenance-loop --repo druiz07/arbolado-maintenance -f seed_dependabot_backlog=true
 ```
+
+> **⚠ Estado operativo (puede ser transitorio):** durante un drenado de backlog
+> L1 el cron puede estar **temporalmente en `*/10`** en vez de `*/30`; al
+> terminar el drenado se revierte a `*/30` (cadencia real de producción).
+> **Prioridad mientras dure:** al empezar cualquier sesión, revisar y gradar
+> primero los PRs `auto:dry-run` abiertos en arbolado-app
+> (`gh pr list -R druiz07/arbolado-app --label auto:dry-run`). Estado vivo
+> exacto: ver `docs/auto-maintenance/arranque-plan.md` (HITO FINAL) en
+> arbolado-proyecto.
 
 El job `apply-playbooks` corre en cron `*/30` (cada 30 min) desde 2026-05-16 (antes horario desde 2026-05-10; L2 aceleración, alineado con el Worker `*/30`). Cada ejecución:
 1. lee KV (`signal:*`), salta los ya marcados (`signal_seen:<hash>`),
