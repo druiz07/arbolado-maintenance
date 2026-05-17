@@ -3,7 +3,7 @@
   "model_used": "none",
   "diff_size": 3,
   "tests_passed": true,
-  "pr_merged": null,
+  "pr_merged": false,
   "retry_count": 0,
   "policy_violations": [],
   "classification_margin": 1,
