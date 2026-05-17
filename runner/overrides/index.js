@@ -15,7 +15,13 @@
 // 'npm test', 'npm run build') — sin interpolación de datos de la señal, por
 // lo que no hay superficie de inyección de shell.
 
-import { parseTargetVersion, manifestToPackageJsonPath, siblingLockPath } from './version.js';
+import semver from 'semver';
+import {
+  parseTargetVersion,
+  manifestToPackageJsonPath,
+  siblingLockPath,
+  resolveInstalledVersions,
+} from './version.js';
 import { applyOverride } from './apply.js';
 import { enforceMaxDiff } from './diff.js';
 import { auditClean } from './audit.js';
@@ -76,6 +82,34 @@ export async function runOverridePlaybook({ signal, repoDir, io, maxDiffLines = 
   }
   const snapshot = { pkgAbs, lockAbs, pkgText, lockText };
 
+  // Fix 1 — guardia anti-downgrade. Si el lockfile YA resuelve la dependencia
+  // a una versión >= la parcheada en TODAS sus instancias, fijar el override a
+  // patched_versions sería un downgrade (o no-op) sin ganancia de seguridad
+  // (causa raíz del spam de 36 PRs stale-replay del 2026-05-17). Si no se puede
+  // determinar (sin lock, dep no resuelta, lock corrupto) → proceder: npm audit
+  // es la red de seguridad final.
+  if (lockText !== null) {
+    let lockJson = null;
+    try {
+      lockJson = JSON.parse(lockText);
+    } catch {
+      lockJson = null;
+    }
+    const installed = resolveInstalledVersions(lockJson, signal.dependency);
+    if (
+      installed.length > 0 &&
+      installed.every((v) => semver.valid(v) && semver.gte(v, targetVersion))
+    ) {
+      return {
+        status: 'skipped',
+        stage: 'already_safe',
+        reason: 'installed_satisfies_patched_range',
+        targetVersion,
+        installed,
+      };
+    }
+  }
+
   let packageJson;
   try {
     packageJson = JSON.parse(pkgText);
@@ -107,6 +141,30 @@ export async function runOverridePlaybook({ signal, repoDir, io, maxDiffLines = 
   if (install.code !== 0) {
     await restoreSnapshot({ io, snapshot });
     return { status: 'rolled_back', stage: 'npm_install', operation, targetVersion, detail: install.stderr };
+  }
+
+  // Fix 2 — supresión de no-op. Si el lockfile existía y `npm install` lo dejó
+  // byte-idéntico, el override no cambió la resolución real (era redundante):
+  // abrir un PR sólo añadiría ruido (entrada overrides sin efecto). Se restaura
+  // package.json y se reporta noop SIN PR. Si no había lock antes no se puede
+  // concluir → se preserva el comportamiento previo (proceder).
+  if (snapshot.lockText !== null) {
+    let lockAfter = null;
+    try {
+      lockAfter = await io.readFile(lockAbs);
+    } catch {
+      lockAfter = null;
+    }
+    if (lockAfter !== null && lockAfter === snapshot.lockText) {
+      await restoreSnapshot({ io, snapshot });
+      return {
+        status: 'noop',
+        stage: 'lockfile_unchanged',
+        reason: 'override_did_not_change_lockfile',
+        targetVersion,
+        pkgRel,
+      };
+    }
   }
 
   // required_checks: npm audit (la advisory concreta debe desaparecer)

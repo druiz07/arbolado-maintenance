@@ -222,6 +222,117 @@ test('runOverridePlaybook: npm corre en el dir del package.json (subdir)', async
   }
 });
 
+// --- Fix 1: guardia anti-downgrade ---
+// El playbook fijaba ciegamente signal.patched_versions aunque la versión ya
+// resuelta en el lockfile fuera >= → downgrade sin ganancia de seguridad
+// (causa raíz del spam de 36 PRs stale-replay del 2026-05-17).
+test('Fix1 anti-downgrade: lockfile ya >= patched → skipped, NO escribe ni downgradea', async () => {
+  const pkgAbs = '/repo/electron-app/package.json';
+  const lockAbs = '/repo/electron-app/package-lock.json';
+  const pkg = JSON.stringify({ name: 'app', devDependencies: { svgo: '^1' } }, null, 2);
+  const lock = JSON.stringify({
+    lockfileVersion: 3,
+    packages: { 'node_modules/nth-check': { version: '2.1.3' } },
+  });
+  const { io, writes } = makeIo({ files: { [pkgAbs]: pkg, [lockAbs]: lock } });
+  // okSignal: nth-check >=2.0.1; instalada 2.1.3 ≥ 2.0.1 → no hay nada que mitigar
+  const r = await runOverridePlaybook({ signal: okSignal, repoDir: '/repo', io });
+  assert.equal(r.status, 'skipped');
+  assert.equal(r.stage, 'already_safe');
+  assert.equal(writes.length, 0, 'no debe escribir ni downgradear si ya es segura');
+});
+
+test('Fix1 anti-downgrade: alguna instancia < patched → procede (hay vuln real)', async () => {
+  const pkgAbs = '/repo/electron-app/package.json';
+  const lockAbs = '/repo/electron-app/package-lock.json';
+  const pkg = JSON.stringify({ name: 'app' }, null, 2);
+  const lock = JSON.stringify({
+    lockfileVersion: 3,
+    packages: {
+      'node_modules/nth-check': { version: '2.1.3' },
+      'node_modules/svgo/node_modules/nth-check': { version: '1.0.2' },
+    },
+  });
+  const { io } = makeIo({
+    files: { [pkgAbs]: pkg, [lockAbs]: lock },
+    runImpl: (cmd) => (cmd === 'npm audit --json'
+      ? { code: 0, stdout: cleanAudit, stderr: '' }
+      : { code: 0, stdout: '', stderr: '' }),
+  });
+  // npm install regenera el lockfile (cambio real → no es no-op)
+  const origRun = io.run;
+  io.run = async (cmd, opts) => {
+    const res = await origRun(cmd, opts);
+    if (cmd === 'npm install') await io.writeFile(lockAbs, lock + '\n// regen');
+    return res;
+  };
+  const r = await runOverridePlaybook({ signal: okSignal, repoDir: '/repo', io });
+  assert.equal(r.status, 'applied', 'con una instancia 1.0.2 < 2.0.1 sí hay que mitigar');
+});
+
+test('Fix1 anti-downgrade: sin lockfile o dep no resuelta → procede (no se puede determinar)', async () => {
+  const pkgAbs = '/repo/electron-app/package.json';
+  const { io } = makeIo({
+    files: { [pkgAbs]: JSON.stringify({ name: 'app' }, null, 2) },
+    runImpl: (cmd) => (cmd === 'npm audit --json'
+      ? { code: 0, stdout: cleanAudit, stderr: '' }
+      : { code: 0, stdout: '', stderr: '' }),
+  });
+  const r = await runOverridePlaybook({ signal: okSignal, repoDir: '/repo', io });
+  assert.equal(r.status, 'applied');
+});
+
+// --- Fix 2: supresión de no-op (lockfile sin cambios tras npm install) ---
+// Si el override no altera el lockfile (la resolución ya era esa), abrir un PR
+// es ruido: package.json gana una entrada overrides redundante y 0 cambio real.
+test('Fix2 no-op: npm install no cambia el lockfile → noop, restaura, NO PR', async () => {
+  const pkgAbs = '/repo/electron-app/package.json';
+  const lockAbs = '/repo/electron-app/package-lock.json';
+  const pkg = JSON.stringify({ name: 'app', devDependencies: { svgo: '^1' } }, null, 2);
+  // lock válido SIN resolver nth-check → la guardia Fix1 no corta; pero
+  // npm install (mock) no lo modifica → lockfile idéntico → no-op.
+  const lock = JSON.stringify({ lockfileVersion: 3, packages: { '': { name: 'app' } } });
+  const { io, fs } = makeIo({
+    files: { [pkgAbs]: pkg, [lockAbs]: lock },
+    runImpl: (cmd) => (cmd === 'npm audit --json'
+      ? { code: 0, stdout: cleanAudit, stderr: '' }
+      : { code: 0, stdout: '', stderr: '' }), // npm install NO toca fs
+  });
+  const r = await runOverridePlaybook({ signal: okSignal, repoDir: '/repo', io });
+  assert.equal(r.status, 'noop');
+  assert.equal(r.stage, 'lockfile_unchanged');
+  assert.equal(fs.get(pkgAbs), pkg, 'package.json restaurado (override redundante)');
+  assert.equal(fs.get(lockAbs), lock, 'lockfile intacto');
+});
+
+test('Fix2 no-op: si npm install SÍ cambia el lockfile → applied (cambio real)', async () => {
+  const pkgAbs = '/repo/electron-app/package.json';
+  const lockAbs = '/repo/electron-app/package-lock.json';
+  const pkg = JSON.stringify({ name: 'app' }, null, 2);
+  const lock = JSON.stringify({ lockfileVersion: 3, packages: { '': {} } });
+  const { io } = makeIo({
+    files: { [pkgAbs]: pkg, [lockAbs]: lock },
+    runImpl: (cmd, opts) => {
+      if (cmd === 'npm install') {
+        // simula regeneración real del lockfile
+        return { code: 0, stdout: '', stderr: '', _mutate: true };
+      }
+      return cmd === 'npm audit --json'
+        ? { code: 0, stdout: cleanAudit, stderr: '' }
+        : { code: 0, stdout: '', stderr: '' };
+    },
+  });
+  // parche el io.run para que npm install reescriba el lock (cambio real)
+  const origRun = io.run;
+  io.run = async (cmd, opts) => {
+    const res = await origRun(cmd, opts);
+    if (cmd === 'npm install') await io.writeFile(lockAbs, lock + '\n// regenerado');
+    return res;
+  };
+  const r = await runOverridePlaybook({ signal: okSignal, repoDir: '/repo', io });
+  assert.equal(r.status, 'applied');
+});
+
 test('runOverridePlaybook: package.json en raíz → npm corre en repoDir', async () => {
   const pkgAbs = '/repo/package.json';
   const cwds = [];

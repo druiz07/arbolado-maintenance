@@ -52,6 +52,46 @@ export function manifestToPackageJsonPath(manifestPath) {
 }
 
 /**
+ * Extrae TODAS las versiones resueltas de `dependency` en un package-lock.json
+ * parseado. Soporta lockfileVersion 2/3 (mapa `packages`) y 1 (árbol
+ * `dependencies` anidado). Usado por la guardia anti-downgrade (Fix 1): si la
+ * versión instalada ya satisface el rango parcheado, fijar el override sería un
+ * downgrade sin ganancia de seguridad (causa raíz del spam stale-replay).
+ *
+ * @param {object|null} lockJson — package-lock.json parseado (o null)
+ * @param {string} dependency — nombre del paquete (puede ser scoped @s/n)
+ * @returns {string[]} versiones resueltas (sin orden garantizado, puede estar vacío)
+ */
+export function resolveInstalledVersions(lockJson, dependency) {
+  if (!lockJson || typeof lockJson !== 'object') return [];
+  if (typeof dependency !== 'string' || dependency.length === 0) return [];
+  const out = [];
+
+  // lockfileVersion 2/3: mapa `packages` con claves node_modules/...
+  const packages = lockJson.packages;
+  if (packages && typeof packages === 'object') {
+    const suffix = `node_modules/${dependency}`;
+    for (const [key, meta] of Object.entries(packages)) {
+      if (!meta || typeof meta.version !== 'string') continue;
+      if (key === suffix || key.endsWith(`/${suffix}`)) out.push(meta.version);
+    }
+  }
+
+  // lockfileVersion 1: árbol `dependencies` anidado.
+  const walk = (deps) => {
+    if (!deps || typeof deps !== 'object') return;
+    for (const [name, meta] of Object.entries(deps)) {
+      if (!meta || typeof meta !== 'object') continue;
+      if (name === dependency && typeof meta.version === 'string') out.push(meta.version);
+      walk(meta.dependencies);
+    }
+  };
+  walk(lockJson.dependencies);
+
+  return [...new Set(out)];
+}
+
+/**
  * @param {string} pkgJsonPath — ruta de package.json
  * @returns {string} ruta del package-lock.json hermano
  */

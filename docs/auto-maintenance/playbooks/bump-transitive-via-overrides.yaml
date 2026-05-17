@@ -162,6 +162,20 @@ execution:
     - patchedVersionCheck:
         input: { patched_versions: signal.patched_versions }
         on_null: edge_case.no_patch_available
+    - dedupByDependency:                  # Fix 3 — dedup por dependencia
+        # Coalesce N señales de la MISMA dep a UNA, fijando la versión segura
+        # máxima del grupo y fusionando los advisory_ids. Evita N PRs (1 por
+        # advisory) que pinnean la misma dep. Determinista, sin IO:
+        # runner/overrides/dedupe.js (coalesceSignalsByDependency).
+        on_coalesced: continue_with_max_safe_version
+    - antiDowngradeCheck:                 # Fix 1 — guardia anti-downgrade
+        # Lee TODAS las versiones resueltas de la dep en package-lock.json
+        # (runner/overrides/version.js resolveInstalledVersions). Si todas son
+        # >= patched_versions, fijar el override sería downgrade/no-op sin
+        # ganancia de seguridad → skip. Si no se puede determinar (sin lock,
+        # dep no resuelta, lock corrupto) → proceder: npm audit es la red final.
+        input: { lockfile: signal.path, dependency: signal.dependency, patched_versions: signal.patched_versions }
+        on_already_safe: edge_case.already_safe
   # No hay sección `aider`. El executor es runner/overrides (script determinista).
   overrides:
     manifest_from: signal.path          # ej. electron-app/package-lock.json
@@ -183,6 +197,12 @@ execution:
         max: constraints.max_diff_lines
         scope: package.json_only        # excluye package-lock.json regenerado
         on_exceed: block_diff_size_exceeded
+    - noopSuppression:                  # Fix 2 — supresión de no-op
+        # Tras `npm install`: si el package-lock.json quedó byte-idéntico al
+        # previo, el override no cambió la resolución real → restaurar
+        # package.json y reportar noop SIN abrir PR (sería ruido redundante).
+        # Si no había lock previo no se concluye → proceder.
+        on_lockfile_unchanged: edge_case.lockfile_unchanged
 
 postconditions:
   require_tests_pass: true
@@ -208,3 +228,9 @@ edge_cases:
   parent_strict_range:
     action: open_issue
     reason: "parent_pins_vulnerable_range_override_ineffective"
+  already_safe:                          # Fix 1
+    action: skip
+    reason: "installed_satisfies_patched_range"
+  lockfile_unchanged:                    # Fix 2
+    action: skip
+    reason: "override_did_not_change_lockfile"

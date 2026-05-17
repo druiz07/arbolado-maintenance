@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseTargetVersion, manifestToPackageJsonPath, siblingLockPath } from './version.js';
+import {
+  parseTargetVersion,
+  manifestToPackageJsonPath,
+  siblingLockPath,
+  resolveInstalledVersions,
+} from './version.js';
 
 test('parseTargetVersion: ">=1.2.3" → "1.2.3"', () => {
   assert.equal(parseTargetVersion('>=1.2.3'), '1.2.3');
@@ -64,4 +69,50 @@ test('siblingLockPath: deriva el lock hermano', () => {
 test('siblingLockPath: path que no termina en package.json → throws', () => {
   assert.throws(() => siblingLockPath('electron-app/'), /must end with package.json/);
   assert.throws(() => siblingLockPath(''), /non-empty string/);
+});
+
+// --- resolveInstalledVersions (guardia anti-downgrade, Fix 1) ---
+
+test('resolveInstalledVersions: lockfile v3 packages — todas las instancias resueltas', () => {
+  const lock = {
+    lockfileVersion: 3,
+    packages: {
+      '': { name: 'app' },
+      'node_modules/nth-check': { version: '2.1.1' },
+      'node_modules/svgo/node_modules/nth-check': { version: '1.0.2' },
+      'node_modules/other': { version: '9.9.9' },
+    },
+  };
+  const got = resolveInstalledVersions(lock, 'nth-check').sort();
+  assert.deepEqual(got, ['1.0.2', '2.1.1']);
+});
+
+test('resolveInstalledVersions: lockfile v1 dependencies anidadas', () => {
+  const lock = {
+    lockfileVersion: 1,
+    dependencies: {
+      svgo: {
+        version: '1.3.2',
+        dependencies: {
+          'nth-check': { version: '1.0.2' },
+        },
+      },
+      'nth-check': { version: '2.0.1' },
+    },
+  };
+  const got = resolveInstalledVersions(lock, 'nth-check').sort();
+  assert.deepEqual(got, ['1.0.2', '2.0.1']);
+});
+
+test('resolveInstalledVersions: paquete scoped @scope/name', () => {
+  const lock = {
+    lockfileVersion: 3,
+    packages: { 'node_modules/@scope/pkg': { version: '3.2.1' } },
+  };
+  assert.deepEqual(resolveInstalledVersions(lock, '@scope/pkg'), ['3.2.1']);
+});
+
+test('resolveInstalledVersions: dep ausente → []', () => {
+  assert.deepEqual(resolveInstalledVersions({ packages: {} }, 'nth-check'), []);
+  assert.deepEqual(resolveInstalledVersions(null, 'nth-check'), []);
 });
