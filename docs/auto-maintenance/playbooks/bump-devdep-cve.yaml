@@ -4,21 +4,18 @@
 # Esta copia existe para que el loader del runner pueda cargar todos los playbooks
 # desde un único directorio sin checkout cruzado del repo privado.
 #
-# DRIFT 2026-05-12 (Sem 4 Sesión C): el bloque `aider.prompt` de abajo se refina
-# para que el spec refleje las nuevas reglas TD-1 (precondición dep_exists +
-# disclaimer explícito "NO añadas dep si no existe"). El runtime cargado por el
-# loader es esta copia, así que es la load-bearing. La canónica en arbolado-app
-# queda desincronizada hasta TD-10 (resync canónica vía PR cross-repo).
-#
-# 2026-05-14 (Sem 4 Sesión A cierre): el bloque `execution.model_strategy` SÍ
-# se sincronizó con el canónico — ambos archivos declaran ahora
-# `groq/openai/gpt-oss-120b` como primary (sustituye el `groq/kimi-k2` retirado
-# por Groq). Drift TD-10 RESTANTE: `aider.prompt` + `pre_aider_steps.depExistsCheck`
-# + ejemplos clasificador. Resync completa sigue diferida a próxima sesión cross-repo.
+# TD-10 CERRADO 2026-05-16: el cuerpo (desde `id:`) es HASH IDÉNTICO al
+# canónico en arbolado-app — el canónico se re-sincronizó adoptando esta
+# versión refinada del runtime (`aider.prompt` afinado + `pre_aider_steps.
+# depExistsCheck` TD-1 + poda de ejemplos obsoletos). Esta copia sigue siendo
+# la load-bearing (la que carga el loader); ambas coinciden. Mantener la
+# paridad: cualquier cambio futuro se aplica a las DOS en el mismo PR.
 #
 # Históricas:
 # - 2026-05-09 (Sem 1): primera copia tras Sesión 0 — hash idéntico al canónico.
-# - 2026-05-12 (Sem 4 Sesión C): drift voluntario — ver TD-10.
+# - 2026-05-12 (Sem 4 Sesión C): drift voluntario (refino TD-1) — fue TD-10.
+# - 2026-05-14 (Sem 4 Sesión A): `execution.model_strategy` sincronizado.
+# - 2026-05-16: canónico re-sincronizado → hash idéntico, TD-10 cerrado.
 
 id: bump-devdep-cve
 version: 1

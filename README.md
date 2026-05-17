@@ -127,8 +127,8 @@ El diseño completo está en **`druiz07/arbolado-app`** (privado, requiere acces
 └── docs/auto-maintenance/
     ├── playbooks/                     # mirror del canónico
     │   ├── README.md
-    │   ├── bump-devdep-cve.yaml       # ⚠ DRIFT 2026-05-12 vs canónico (TD-10): refinado en
-    │   │                              #   Sem 4 C con depExistsCheck + prompt explícito
+    │   ├── bump-devdep-cve.yaml       # ✅ TD-10 cerrado 2026-05-16: hash idéntico al
+    │   │                              #   canónico (resincronizado); load-bearing
     │   ├── bump-transitive-via-overrides.yaml # ✅ P1 2026-05-15 (TD-11): transitives vía
     │   │                              #   package.json#overrides, sin Aider; CABLEADO (TD-12 ✅)
     │   ├── fix-tests-minor-version-bump.yaml
