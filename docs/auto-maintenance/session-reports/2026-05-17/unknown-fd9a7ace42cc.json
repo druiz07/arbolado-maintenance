@@ -1,0 +1,13 @@
+{
+  "playbook_id": "unknown",
+  "model_used": "none",
+  "diff_size": 0,
+  "tests_passed": false,
+  "pr_merged": null,
+  "retry_count": 0,
+  "policy_violations": [],
+  "classification_margin": null,
+  "signal_hash": "fd9a7ace42cc728cb96ebe614f8250db470819c89d6dd7de48c5c565980b1f23",
+  "timestamp": "2026-05-17T14:29:54.524Z",
+  "failure_stage": "classifier"
+}
