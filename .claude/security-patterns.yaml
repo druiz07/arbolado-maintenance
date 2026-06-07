@@ -1,0 +1,44 @@
+# Patrones de seguridad per-edit (capa 1 del plugin Security Guidance) para el
+# runner de mantenimiento autónomo. Disparan AL INSTANTE en cada edición, sin
+# llamada a modelo. Específicos del modelo de amenaza del runner (Node + CI +
+# child_process + tokens + señales Dependabot no confiables).
+
+patterns:
+  # --- Ejecución de comandos ---
+  - rule_name: shell_true
+    substrings: ["shell: true", "shell:true"]
+    reminder: "Command injection: shell:true interpreta metacaracteres. Usa spawn con array de args y shell:false (allowlist de comandos npm/git fijos)."
+
+  - rule_name: exec_template_string
+    regex: "\\b(exec|execSync|execFile)\\s*\\(\\s*`"
+    reminder: "exec/execSync con template string puede interpolar datos de señal → command injection. Usa spawn(bin, argsArray, {shell:false})."
+
+  - rule_name: dynamic_code_exec
+    regex: "\\b(eval|new Function)\\s*\\("
+    reminder: "Ejecución dinámica de código. No usar con datos de señal; imports estáticos y JSON.parse."
+
+  - rule_name: dynamic_require
+    regex: "require\\(\\s*[a-zA-Z_$][\\w$.]*\\s*\\)"
+    reminder: "require() dinámico con variable. Usa imports estáticos — nunca cargar módulos a partir de datos de señal."
+
+  # --- Tokens y secretos ---
+  - rule_name: secret_in_log
+    regex: "console\\.(log|info|warn|error)\\([^)]*(TOKEN|SECRET|GH_PAT|API_KEY|api[_-]?key|Bearer)"
+    reminder: "Posible log de un secreto/token. No logear credenciales (ni en console ni en artefactos del CI)."
+
+  - rule_name: hardcoded_cloudflare_token
+    regex: "CLOUDFLARE_API_TOKEN\\s*[:=]\\s*['\"][A-Za-z0-9_-]{20,}"
+    reminder: "Token de Cloudflare hardcodeado. Usar secrets del CI / variable de entorno."
+
+  - rule_name: hardcoded_github_token
+    regex: "(ghp_|github_pat_|gho_|ghs_)[A-Za-z0-9_]{20,}"
+    reminder: "Token de GitHub hardcodeado. Nunca committear — rotar si ya ocurrió."
+
+  - rule_name: hardcoded_llm_key
+    regex: "(gsk_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9]{20,})"
+    reminder: "API key de LLM (Groq/OpenAI-style) hardcodeada. Cargar de variable de entorno."
+
+  # --- SSRF / construcción de URLs con datos externos ---
+  - rule_name: url_template_with_var
+    regex: "(fetch|https?\\.(get|request))\\(\\s*`https?://\\$\\{"
+    reminder: "URL construida con interpolación al principio del host → posible SSRF. Los hosts deben ser constantes; solo el path puede variar (y con encodeURIComponent)."
