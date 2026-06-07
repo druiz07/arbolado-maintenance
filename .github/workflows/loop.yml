@@ -739,19 +739,54 @@ jobs:
           cat ../workspace/intermediate/report-result.json
           echo success > ../workspace/state/write-report.outcome
 
+      # TD-4 (disparado 2026-06-07: el report del PR #44 se perdió en un push-race
+      # durante alta concurrencia en main; el antiguo `git push || echo` enmascaraba
+      # el fallo como success → gap silencioso en session-reports/ → feedback loop
+      # sin registrar el outcome). Fix: push robusto con `pull --rebase` + retry (el
+      # report es un fichero nuevo de nombre único por hash → rebase sin conflicto),
+      # y si tras 3 intentos falla NO se enmascara: se abre issue (observabilidad) y
+      # el step sale 1 (run en rojo = señal de alarma del RUNBOOK §4). Los steps
+      # posteriores (mark-signal-seen, open-pr) gatean por write-report.outcome, no
+      # por este step → siguen corriendo aunque el push del report falle.
       - name: Commit and push session report
         id: commit-report
         if: always() && steps.write-report.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          REPORT_PATH=$(jq -r '.path' workspace/intermediate/report-result.json)
           STAGE=$(jq -r '.failure_stage' workspace/intermediate/report-result.json)
           git config user.name 'arbolado-maintenance-bot'
           git config user.email 'maintenance-bot@users.noreply.github.com'
           PB=$(jq -r '.playbookId // "unknown"' workspace/intermediate/classifier.json 2>/dev/null || echo unknown)
+          DEP=$(jq -r '.dependency' workspace/intermediate/signal.json)
           git add docs/auto-maintenance/session-reports/
-          git commit -m "report(g5): $PB $(jq -r '.dependency' workspace/intermediate/signal.json) ($STAGE)" \
-            || echo 'nothing to commit (idempotency hit)'
-          git push origin HEAD:main || echo 'push failed — manual review needed'
+          if git diff --cached --quiet; then
+            echo "nothing to commit (idempotency hit) — report ya existe en el árbol"
+            exit 0
+          fi
+          git commit -m "report(g5): $PB $DEP ($STAGE)"
+          pushed=false
+          for attempt in 1 2 3; do
+            # pull --rebase integra cualquier commit concurrente (otro cron run, o
+            # un push manual) ANTES de reintentar; el report es fichero nuevo único
+            # → no hay conflicto de rebase.
+            if git pull --rebase origin main && git push origin HEAD:main; then
+              pushed=true
+              echo "✓ session-report pushed (intento $attempt)"
+              break
+            fi
+            echo "✗ push intento $attempt falló — backoff y reintento"
+            sleep $((attempt * 5))
+          done
+          if [ "$pushed" != "true" ]; then
+            echo "::error::session-report push falló tras 3 intentos (TD-4) — feedback loop NO registrará este outcome"
+            gh issue create \
+              --repo "${{ github.repository }}" \
+              --title "[auto-maintenance] session-report push falló (TD-4)" \
+              --body "El run \`${{ github.run_id }}\` generó el session-report de \`$DEP\` (failure_stage=$STAGE) pero \`git push\` a main falló tras 3 intentos (push-race o protección de rama). El feedback loop NO registrará este outcome hasta resolverlo manualmente. Revisar el artifact \`apply-playbooks-${{ github.run_id }}\` (workspace/intermediate/) para recuperar el report si es necesario." \
+              || echo "issue create también falló — revisión manual necesaria"
+            exit 1
+          fi
 
       # ---------- 9. Abrir PR auto:dry-run en arbolado-app (sólo si failure_stage=none) ----------
       - name: Open auto:dry-run PR in arbolado-app
