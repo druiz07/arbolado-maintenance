@@ -72,6 +72,18 @@ test('runOverridePlaybook: is_transitive=false → skipped (wrong playbook)', as
   assert.equal(r.stage, 'not_transitive');
 });
 
+test('runOverridePlaybook: signal.path con ../ escapa repoDir → skipped path_escape, NO toca fs', async () => {
+  const { io, writes } = makeIo();
+  const r = await runOverridePlaybook({
+    signal: { ...okSignal, path: '../../../tmp/evil/package-lock.json' },
+    repoDir: '/repo',
+    io,
+  });
+  assert.equal(r.status, 'skipped');
+  assert.equal(r.stage, 'path_escape');
+  assert.equal(writes.length, 0);
+});
+
 test('runOverridePlaybook: sin patched_versions → skipped', async () => {
   const { io } = makeIo();
   const r = await runOverridePlaybook({

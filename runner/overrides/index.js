@@ -15,6 +15,7 @@
 // 'npm test', 'npm run build') — sin interpolación de datos de la señal, por
 // lo que no hay superficie de inyección de shell.
 
+import path from 'node:path';
 import semver from 'semver';
 import {
   parseTargetVersion,
@@ -32,6 +33,18 @@ const DEFAULT_MAX_DIFF = 80;
 function joinRepo(repoDir, rel) {
   const base = repoDir.replace(/[/\\]+$/, '');
   return `${base}/${rel}`;
+}
+
+// Endurecimiento defensivo (path-traversal). `rel` deriva de signal.path
+// (manifest_path del alert). GitHub lo deriva de la ubicación del manifest en el
+// propio repo, pero se valida igualmente: si la ruta resuelta escapa de repoDir
+// vía `../`, no se debe leer/escribir fuera del repo target. path.posix → mismo
+// comportamiento en Windows (tests) y Linux (CI), consistente con el normalizado
+// a `/` del resto del módulo.
+function escapesRepo(repoDir, rel) {
+  const base = path.posix.normalize(repoDir.replace(/\\/g, '/').replace(/\/+$/, ''));
+  const joined = path.posix.normalize(`${base}/${String(rel).replace(/\\/g, '/')}`);
+  return joined !== base && !joined.startsWith(`${base}/`);
 }
 
 /**
@@ -62,6 +75,11 @@ export async function runOverridePlaybook({ signal, repoDir, io, maxDiffLines = 
   const targetVersion = parseTargetVersion(signal.patched_versions);
   const pkgRel = manifestToPackageJsonPath(signal.path);
   const lockRel = siblingLockPath(pkgRel);
+  // Guardia anti path-traversal: abortar antes de tocar el fs si signal.path
+  // escapa de repoDir (no escribir package.json fuera del repo target).
+  if (escapesRepo(repoDir, pkgRel) || escapesRepo(repoDir, lockRel)) {
+    return { status: 'skipped', stage: 'path_escape', reason: 'manifest_path_escapes_repo_dir' };
+  }
   const pkgAbs = joinRepo(repoDir, pkgRel);
   const lockAbs = joinRepo(repoDir, lockRel);
   // npm install/audit/test/build deben ejecutarse en el DIRECTORIO del
