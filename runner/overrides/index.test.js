@@ -351,3 +351,39 @@ test('runOverridePlaybook: package.json en raíz → npm corre en repoDir', asyn
     assert.equal(c, '/repo', `package.json en raíz → cwd debe ser repoDir, no ${c}`);
   }
 });
+
+// --- Gaps de catálogo cerrados (camino-A robot operativo, 2026-06-07) ---
+// Ramas defensivas presentes en index.js pero sin test directo. Caracterizan
+// dos "tipos de señal de input" residuales del flujo override: el manifest del
+// repo target corrupto, y `npm audit` devolviendo algo no-JSON. Ambas deben
+// degradar de forma segura (sin escribir / restaurando), no romper el run.
+
+test('runOverridePlaybook: package.json corrupto → skipped stage unparseable_package_json, NO escribe', async () => {
+  const pkgAbs = '/repo/electron-app/package.json';
+  // Sin lockfile → la guardia Fix1 no corta; el JSON.parse de pkgText lanza.
+  const { io, writes } = makeIo({
+    files: { [pkgAbs]: '{ "name": "app", esto-no-es-json,,, }' },
+  });
+  const r = await runOverridePlaybook({ signal: okSignal, repoDir: '/repo', io });
+  assert.equal(r.status, 'skipped');
+  assert.equal(r.stage, 'unparseable_package_json');
+  assert.equal(writes.length, 0, 'no debe escribir si el manifest no parsea');
+});
+
+test('runOverridePlaybook: npm audit emite no-JSON → rolled_back stage audit_unparseable + restaura', async () => {
+  const pkgAbs = '/repo/electron-app/package.json';
+  const original = JSON.stringify({ name: 'app' }, null, 2);
+  // Sin lockfile → Fix1/Fix2 no cortan; el override se aplica, npm install OK,
+  // y `npm audit --json` devuelve texto no parseable (npm warn en stdout, etc.)
+  // → no se puede verificar la advisory → rollback seguro.
+  const { io, fs } = makeIo({
+    files: { [pkgAbs]: original },
+    runImpl: (cmd) => (cmd === 'npm audit --json'
+      ? { code: 0, stdout: 'npm warn config ... <output no-JSON>', stderr: '' }
+      : { code: 0, stdout: '', stderr: '' }),
+  });
+  const r = await runOverridePlaybook({ signal: okSignal, repoDir: '/repo', io });
+  assert.equal(r.status, 'rolled_back');
+  assert.equal(r.stage, 'audit_unparseable');
+  assert.equal(fs.get(pkgAbs), original, 'package.json restaurado tras audit ilegible');
+});

@@ -35,6 +35,10 @@ on:
         description: 'L1 replay dry-run: regenerar el backlog real de Dependabot de arbolado-app y sembrar TODAS las señales en KV (el cron las drena 1/run en dry-run → muchos PRs auto:dry-run). Solo dispatch manual.'
         type: boolean
         default: false
+      seed_open_alerts_only:
+        description: 'Sembrar SOLO las alertas Dependabot en estado open (activas), no el backlog fixed. Evita el ruido stale del backlog completo. Útil para procesar alertas reales nuevas 1 a 1. Solo dispatch manual.'
+        type: boolean
+        default: false
 
 # Opt-in temprano al runtime Node 24 para JS-based actions.
 # A partir de 2026-06-02 GitHub lo fuerza por defecto; lo activamos antes para validar
@@ -271,11 +275,12 @@ jobs:
       # abiertas; .gitignore:145-148 lo cubre; NUNCA commitear). TTL 7d para
       # sobrevivir al drenado (~59 runs ≈ 30 h a */30). Sigue dry-run: open-pr
       # siempre etiqueta auto:dry-run y Daniel mergea/rechaza a mano.
-      - name: Seed Dependabot backlog in KV (L1 — replay dry-run)
-        if: github.event_name == 'workflow_dispatch' && inputs.seed_dependabot_backlog == true
+      - name: Seed Dependabot backlog in KV (L1 replay dry-run / open-only)
+        if: github.event_name == 'workflow_dispatch' && (inputs.seed_dependabot_backlog == true || inputs.seed_open_alerts_only == true)
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           GH_TOKEN: ${{ secrets.GH_PAT_ARBOLADO_APP }}
+          SEED_OPEN_ONLY: ${{ inputs.seed_open_alerts_only }}
         run: |
           set -euo pipefail
           mkdir -p workspace
@@ -283,7 +288,16 @@ jobs:
           # Dependabot alerts → 403 aquí (decisión de credenciales de Daniel,
           # análoga a la nota de scope Issues en el step de issue). set -e hace
           # el fallo RUIDOSO a propósito: mejor parar que sembrar parcial.
-          gh api 'repos/druiz07/arbolado-app/dependabot/alerts?per_page=100' \
+          # seed_open_alerts_only → solo alertas activas (state=open), evita
+          # re-sembrar las fixed (ruido stale). seed_dependabot_backlog → todas.
+          if [ "${SEED_OPEN_ONLY:-false}" = "true" ]; then
+            QUERY='state=open&per_page=100'
+            echo "modo: solo alertas open (activas)"
+          else
+            QUERY='per_page=100'
+            echo "modo: backlog completo (todos los estados)"
+          fi
+          gh api "repos/druiz07/arbolado-app/dependabot/alerts?${QUERY}" \
             --paginate > workspace/dependabot-backlog-snapshot.json
           node runner/scripts/cli/dependabot-to-signals.mjs \
             workspace/dependabot-backlog-snapshot.json \
