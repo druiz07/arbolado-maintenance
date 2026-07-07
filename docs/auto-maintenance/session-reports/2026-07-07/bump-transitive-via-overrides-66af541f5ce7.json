@@ -1,0 +1,19 @@
+{
+  "playbook_id": "bump-transitive-via-overrides",
+  "model_used": "none",
+  "diff_size": 0,
+  "tests_passed": false,
+  "pr_merged": null,
+  "retry_count": 0,
+  "policy_violations": [
+    {
+      "type": "override_skipped",
+      "stage": "already_safe",
+      "reason": "installed_satisfies_patched_range"
+    }
+  ],
+  "classification_margin": 1,
+  "signal_hash": "66af541f5ce7f25a5bc31ab6309a55a2de363a7d282db29d5e01109e7a86308d",
+  "timestamp": "2026-07-07T13:38:01.411Z",
+  "failure_stage": "policy"
+}
