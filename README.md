@@ -2,6 +2,17 @@
 
 > Runner del **loop de mantenimiento autónomo** para [`druiz07/arbolado-app`](https://github.com/druiz07/arbolado-app) (privado). Este repo es **público** para que GitHub Actions corra con minutos ilimitados — pero contiene **cero código fuente del producto**, solo orquestación: workflows, scripts e infra notes.
 
+> ## 🔴 ESTADO 2026-07-11 — EL ROBOT ESTÁ CIEGO (NO operativo)
+>
+> La **revisión H.4.7** de la ventana supervisada la declaró **NO SUPERADA**. El "silencio limpio" (cron verde, 0 PRs nuevos) era un **falso negativo**:
+> - **Consumidor (`loop.yml`) SANO** — smoke E2E completo (`seed_test_signal`), incluida la guarda anti-downgrade.
+> - **KV de señales VACÍA (`[]`)** habiendo **23 alertas Dependabot abiertas** en `arbolado-app` (1 crítica, 8 high) → **el productor (`cloudflare/worker`, `arbolado-maintenance-detector`) no emite** = **TD-14 (crítico)**.
+> - El override `tmp: 0.2.6` que puso el propio robot (PR #44) **clavaba la versión vulnerable** (advisory del 15-jun) y no lo refrescó = **TD-15**: los overrides con **pin exacto se pudren**.
+>
+> **NO se avanza a "modo full CVEs".** Ventana **reabierta** hasta cerrar TD-14 y TD-15. Las vulnerabilidades reales ya se mitigaron a mano en `arbolado-app` (PR #56). Veredicto + tabla TD: `arbolado-app → docs/auto-maintenance/arranque-plan.md`.
+>
+> ⚠️ La fila **"✅ HITO OPERATIVO (2026-06-07)"** de la tabla de abajo queda **invalidada en cuanto a "operativo"**: el pipeline de *consumo* funciona; lo que falla es la **ingesta de señales**.
+
 ## Qué hace este repo
 
 Periódicamente (cron) ejecuta este pipeline:
