@@ -45,6 +45,28 @@ type RunSummary = {
   errors: string[];
 };
 
+// TD-14 (observabilidad) — heartbeat persistente del productor. El ciclo sólo
+// dejaba rastro en console.log, que nadie lee: un productor roto (o nunca
+// desplegado, lección H.4.7) era indistinguible de "no hay alertas".
+// `last_cycle` se escribe SIN TTL en cada ciclo — también con kill_switch
+// activo o fetch a GitHub roto — y el consumidor (loop.yml, step
+// "Check producer heartbeat") alarma si falta o envejece más del umbral.
+async function writeLastCycle(
+  state: KVNamespace,
+  info: { trigger: 'cron' | 'manual'; cron?: string },
+  summary: RunSummary,
+): Promise<void> {
+  try {
+    await state.put(
+      'last_cycle',
+      JSON.stringify({ at: new Date().toISOString(), ...info, ...summary }),
+    );
+  } catch {
+    // best-effort: el heartbeat nunca debe tumbar el ciclo (si KV falla,
+    // el staleness del propio last_cycle ya es la alarma)
+  }
+}
+
 async function runDetectionCycle(env: Env): Promise<RunSummary> {
   const summary: RunSummary = {
     alerts_seen: 0,
@@ -106,8 +128,9 @@ async function runDetectionCycle(env: Env): Promise<RunSummary> {
 export default {
   async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(
-      runDetectionCycle(env).then((summary) => {
+      runDetectionCycle(env).then(async (summary) => {
         console.log('detector_cycle', JSON.stringify({ cron: event.cron, ...summary }));
+        await writeLastCycle(env.STATE, { trigger: 'cron', cron: event.cron }, summary);
       }),
     );
   },
@@ -118,6 +141,7 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === '/run' && request.method === 'POST') {
       const summary = await runDetectionCycle(env);
+      await writeLastCycle(env.STATE, { trigger: 'manual' }, summary);
       return new Response(JSON.stringify(summary, null, 2), {
         headers: { 'Content-Type': 'application/json' },
       });

@@ -22,6 +22,7 @@ import {
   manifestToPackageJsonPath,
   siblingLockPath,
   resolveInstalledVersions,
+  toCaretRange,
 } from './version.js';
 import { applyOverride } from './apply.js';
 import { enforceMaxDiff } from './diff.js';
@@ -135,10 +136,14 @@ export async function runOverridePlaybook({ signal, repoDir, io, maxDiffLines = 
     return { status: 'skipped', stage: 'unparseable_package_json', reason: 'package_json_not_valid_json' };
   }
 
+  // TD-15: el override se escribe como rango caret (^X.Y.Z), no pin exacto.
+  // La guardia anti-downgrade y npm audit siguen razonando sobre targetVersion
+  // exacta; el caret solo gobierna lo que npm puede resolver a futuro. Un pin
+  // exacto previo del propio robot difiere del caret → bump_override lo sanea.
   const { next, prev, operation } = applyOverride({
     packageJson,
     dependency: signal.dependency,
-    version: targetVersion,
+    version: toCaretRange(targetVersion),
   });
 
   if (operation === 'noop') {

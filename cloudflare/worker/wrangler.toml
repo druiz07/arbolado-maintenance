@@ -3,6 +3,11 @@ main = "src/worker.ts"
 compatibility_date = "2026-05-09"
 account_id = "e4ccfa519c1e0fb94221ca6583220545"
 
+# El endpoint HTTP (fetch: /run, /health) es solo para `wrangler dev`.
+# En producción el cron es la única forma de disparar → sin ruta workers.dev
+# pública (evita que cualquiera dispare ciclos con POST /run).
+workers_dev = false
+
 [[kv_namespaces]]
 binding = "STATE"
 id = "212fe2e1b8874298ad44a9a906375033"

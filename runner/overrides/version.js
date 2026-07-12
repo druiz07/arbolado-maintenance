@@ -32,6 +32,29 @@ export function parseTargetVersion(patchedVersions) {
 }
 
 /**
+ * TD-15: convierte una versión exacta en rango caret para package.json#overrides.
+ * Un pin exacto ("0.2.6") se pudre: si un advisory posterior declara vulnerable
+ * esa misma versión, el override del propio robot mantiene la dep clavada en
+ * ella (caso real: tmp 0.2.6, PR #44 del 7-jun + advisory del 15-jun → 4
+ * semanas fijada en la versión vulnerable). Con caret ("^0.2.7") npm puede
+ * resolver a parches posteriores sin re-editar el override.
+ *
+ * @param {string} version — versión exacta (p.ej. "0.2.7" o "v1.2.3")
+ * @returns {string} rango caret ("^0.2.7")
+ * @throws si la entrada no es una versión concreta (los rangos se rechazan:
+ *         evita doble-caret y entradas ambiguas)
+ */
+export function toCaretRange(version) {
+  const clean = typeof version === 'string' && semver.valid(version)
+    ? semver.clean(version)
+    : null;
+  if (!clean) {
+    throw new Error(`cannot build caret range from invalid version: ${version}`);
+  }
+  return `^${clean}`;
+}
+
+/**
  * @param {string} manifestPath — manifest_path del alert Dependabot
  * @returns {string} ruta del package.json correspondiente (mismo separador `/`)
  * @throws si no es string no vacío

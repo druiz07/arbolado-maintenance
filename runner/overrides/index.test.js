@@ -58,7 +58,9 @@ test('runOverridePlaybook: happy path → applied + override escrito', async () 
   assert.equal(r.operation, 'add_override');
   assert.equal(r.targetVersion, '2.0.1');
   const written = JSON.parse(fs.get(pkgAbs));
-  assert.equal(written.overrides['nth-check'], '2.0.1');
+  // TD-15: rango caret, NO pin exacto — un pin exacto se pudre si un advisory
+  // posterior declara vulnerable justo esa versión (caso real tmp 0.2.6).
+  assert.equal(written.overrides['nth-check'], '^2.0.1');
 });
 
 test('runOverridePlaybook: is_transitive=false → skipped (wrong playbook)', async () => {
@@ -95,13 +97,30 @@ test('runOverridePlaybook: sin patched_versions → skipped', async () => {
   assert.equal(r.stage, 'no_patch_available');
 });
 
-test('runOverridePlaybook: override ya en versión objetivo → noop', async () => {
+test('runOverridePlaybook: override ya en rango caret objetivo → noop', async () => {
   const pkgAbs = '/repo/electron-app/package.json';
   const { io } = makeIo({
-    files: { [pkgAbs]: JSON.stringify({ overrides: { 'nth-check': '2.0.1' } }, null, 2) },
+    files: { [pkgAbs]: JSON.stringify({ overrides: { 'nth-check': '^2.0.1' } }, null, 2) },
   });
   const r = await runOverridePlaybook({ signal: okSignal, repoDir: '/repo', io });
   assert.equal(r.status, 'noop');
+});
+
+// TD-15: los overrides con pin EXACTO puestos por versiones previas del robot
+// deben refrescarse a rango caret cuando llega un advisory nuevo — es el
+// mecanismo por el que los pins podridos se sanean solos.
+test('TD-15: pin exacto previo → bump_override a rango caret', async () => {
+  const pkgAbs = '/repo/electron-app/package.json';
+  const { io, fs } = makeIo({
+    files: { [pkgAbs]: JSON.stringify({ overrides: { 'nth-check': '2.0.0' } }, null, 2) },
+    runImpl: (cmd) => (cmd === 'npm audit --json'
+      ? { code: 0, stdout: cleanAudit, stderr: '' }
+      : { code: 0, stdout: '', stderr: '' }),
+  });
+  const r = await runOverridePlaybook({ signal: okSignal, repoDir: '/repo', io });
+  assert.equal(r.status, 'applied');
+  assert.equal(r.operation, 'bump_override');
+  assert.equal(JSON.parse(fs.get(pkgAbs)).overrides['nth-check'], '^2.0.1');
 });
 
 test('runOverridePlaybook: diff excede max → blocked, NO escribe', async () => {
@@ -207,7 +226,7 @@ test('runOverridePlaybook: lockfile inexistente no rompe el snapshot', async () 
     io,
   });
   assert.equal(r.status, 'applied');
-  assert.ok(JSON.parse(fs.get(pkgAbs)).overrides['nth-check']);
+  assert.equal(JSON.parse(fs.get(pkgAbs)).overrides['nth-check'], '^2.0.1');
 });
 
 // Regresión TD-12: el smoke real (gh run 25929781995) reveló ENOENT —

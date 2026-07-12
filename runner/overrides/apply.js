@@ -6,7 +6,7 @@
  * @param {object} args
  * @param {object} args.packageJson — package.json parseado (no se muta)
  * @param {string} args.dependency — nombre del paquete transitivo
- * @param {string} args.version — versión exacta a fijar (ya resuelta)
+ * @param {string} args.version — valor a fijar tal cual (desde TD-15, rango caret "^X.Y.Z"; este módulo no interpreta el string)
  * @returns {{next:object, prev:object, operation:'add_override'|'bump_override'|'noop'}}
  */
 export function applyOverride({ packageJson, dependency, version }) {
