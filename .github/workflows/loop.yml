@@ -145,6 +145,19 @@ jobs:
               echo "Heartbeat del productor: $at (edad ${age}s, umbral ${STALE_AFTER_SECONDS}s)"
               if [ "$age" -gt "$STALE_AFTER_SECONDS" ]; then
                 stale_reason="last_cycle stale: edad ${age}s > ${STALE_AFTER_SECONDS}s (último ciclo $at)"
+              else
+                # Heartbeat fresco NO implica productor sano: si el PAT caduca
+                # (GH_PAT_ARBOLADO_APP expira, p.ej. 2026-08-06) el Worker sigue
+                # latiendo pero ciego (errors: 401/403). Solo alarma credencial
+                # persistente; otros fallos de fetch (red/5xx) son transitorios
+                # → warning sin issue.
+                auth_err=$(jq -r '[.errors[]? | select(test("^dependabot_fetch:dependabot_api_error:(401|403)"))] | first // empty' last_cycle.json 2>/dev/null || true)
+                other_err=$(jq -r '[.errors[]? | select(startswith("dependabot_fetch:"))] | first // empty' last_cycle.json 2>/dev/null || true)
+                if [ -n "$auth_err" ]; then
+                  stale_reason="heartbeat fresco pero el productor NO puede leer GitHub (PAT caducado/revocado o sin permiso): ${auth_err:0:160}"
+                elif [ -n "$other_err" ]; then
+                  echo "::warning::TD-14 fetch del productor falló en el último ciclo (transitorio, sin issue): ${other_err:0:160}"
+                fi
               fi
             fi
           fi
