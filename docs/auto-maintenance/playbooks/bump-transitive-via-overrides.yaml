@@ -11,7 +11,8 @@
 #   que opera sobre direct deps; coexistencia segura — ver nota classifier).
 # - SIN Aider / SIN LLM — script Node determinista (model_strategy: none, como
 #   rollback-on-build-failure.yaml).
-# - Acción: insertar/actualizar package.json#overrides[dep] = patched_version,
+# - Acción: insertar/actualizar package.json#overrides[dep] = ^patched_version
+#   (rango caret — TD-15: el pin exacto se pudre, ver nota en `overrides:`),
 #   `npm install` (regenera lockfile), validar con `npm audit`.
 # - version_rules permite major: el fix de una transitiva a veces exige un major
 #   del propio paquete transitivo; el riesgo se acota con ROLLBACK si build/test
@@ -37,9 +38,9 @@
 id: bump-transitive-via-overrides
 version: 1
 description: >
-  Mitiga CVEs en dependencias TRANSITIVAS fijando package.json#overrides a la
-  versión parcheada y regenerando el lockfile con npm install. Determinista,
-  sin Aider. Rollback si build/test/audit fallan.
+  Mitiga CVEs en dependencias TRANSITIVAS fijando package.json#overrides a un
+  rango caret (^) de la versión parcheada y regenerando el lockfile con npm
+  install. Determinista, sin Aider. Rollback si build/test/audit fallan.
 
 trigger:
   type: dependabot_alert | custom_worker
@@ -180,14 +181,22 @@ execution:
   overrides:
     manifest_from: signal.path          # ej. electron-app/package-lock.json
     dependency: signal.dependency
-    # target_version = primera versión parcheada exacta (strip ">=" del rango)
+    # target_version = primera versión parcheada exacta (strip ">=" del rango).
+    # TD-15 (2026-07-12): el override se ESCRIBE como rango caret "^{{target_version}}",
+    # no pin exacto. Caso real: el PR #44 (7-jun) fijó "tmp": "0.2.6" exacto; el
+    # advisory del 15-jun declaró vulnerable >=0.2.6 <0.2.7 → el override del
+    # propio robot mantuvo la dep clavada en la versión vulnerable 4 semanas.
+    # Con caret npm resuelve a parches posteriores sin re-editar el override.
+    # La guardia anti-downgrade (Fix 1) y npm audit siguen razonando sobre la
+    # versión exacta; un pin exacto previo se sanea vía bump_override.
+    # Implementación: runner/overrides/version.js#toCaretRange + index.js.
     target_from: signal.patched_versions
     branch_name: "auto/override-{{signal.dependency}}-{{signal_hash}}"
-    pr_title: "[AUTO-DRY-RUN][override] {{signal.dependency}} -> {{target_version}} (transitive CVE)"
+    pr_title: "[AUTO-DRY-RUN][override] {{signal.dependency}} -> ^{{target_version}} (transitive CVE)"
     pr_body: |
       Dependencia transitiva vulnerable: {{signal.dependency}} ({{signal.severity}})
       Advisory: {{signal.advisory_id}}
-      Fijada vía package.json#overrides a {{target_version}}.
+      Fijada vía package.json#overrides a ^{{target_version}} (rango caret, TD-15).
       Lockfile regenerado por `npm install`. `npm audit` post-fix limpio.
 
       Rollback automático si build/test/audit fallaban (no es el caso aquí).

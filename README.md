@@ -53,6 +53,7 @@ Stack 0 € — Aider + Groq Kimi K2 + Gemini Flash + Cloudflare Workers + GH Ac
 | **TD-12** — `bump-transitive-via-overrides` **cableado en `loop.yml`**: branching `Detect playbook kind` + `Apply override` (wrapper `apply-override.mjs` IO real) + `report-bridge.js` (report unificado) + issue `parent_strict_range` + PR override. **Ambos extremos validados con npm real:** rollback (`25928776319`) + **applied → PR `#2`** (`25929991172`) + regresión Aider (`25928876870`). Bug cwd del módulo P1 destapado y corregido (+2 tests). Suite **412→424**. Adelanto proactivo | ✅ 2026-05-15 |
 | **3 fixes dry-run-hardening (G.5)** — el drenado L1 (36 PRs `auto:dry-run` stale-replay, todos rechazados) destapó 3 fallos bloqueantes del playbook override → robot pausado por contrato. Corregidos TDD: **(1) guardia anti-downgrade** (`resolveInstalledVersions` + `skipped/already_safe` si instalado ≥ patched), **(2) supresión de no-op** (`noop/lockfile_unchanged` sin cambio de lock → sin PR), **(3) dedup por dependencia** (`dedupe.js`, N señales misma dep → 1 versión segura máxima). Paridad playbook mirror+canónico. Smoke real arbolado-app (`semver >=5.0.0` → `already_safe`). Suite **424→439**. Robot re-habilitado | ✅ 2026-05-17 |
 | **✅ HITO OPERATIVO (camino A)** — validado el **catálogo completo de tipos de señal** del pipeline G.5 (C1-C6 clasificación / A1-A6 Aider / O1-O13 override / D1 dedup-hash / L1 sin-señal), cobertura 100 %. 2 gaps de cobertura cerrados TDD: `O5 unparseable_package_json` + `O10 audit_unparseable` (ramas defensivas del override). Suite **439→441**. Smoke E2E fresco (`gh run 27089231233`) → Fix 1 anti-downgrade en vivo (`already_safe`). Hallazgos no bloqueantes: TD-13 (coalesce huérfano diferido), divergencia npm-audit=H.4. **Robot declarado operativo por Daniel → ventana 4 semanas supervisadas (≈2026-07-05).** | ✅ 2026-06-07 |
+| **TD-15 + TD-14 observabilidad (H.4.7)** — la review H.4.7 (2026-07-11) declaró la ventana supervisada **NO superada**: KV vacía con 23 alertas Dependabot open → productor mudo. Diagnóstico 2026-07-12: **el Worker detector NUNCA se desplegó a Cloudflare** (el código de Sem 1 existía; el `wrangler deploy` no se ejecutó jamás — todas las señales históricas fueron seeds manuales). Fixes de esta entrega: **(TD-15)** los overrides se escriben como **rango caret `^X.Y.Z`** (`version.js#toCaretRange`) en vez de pin exacto — el pin del propio robot se pudría (caso real `tmp 0.2.6`, PR #44 + advisory 15-jun); un pin exacto previo se sanea vía `bump_override`. **(TD-14 obs.)** el Worker escribe heartbeat **`last_cycle`** (sin TTL) en cada ciclo — también con kill_switch activo o fetch roto — y `loop.yml` gana step `Check producer heartbeat` que abre UN issue (dedup por título) si falta o supera 3 h. `workers_dev = false` (el cron es la única entrada en prod). Suite runner **→446** (+4 TDD) + worker **9/9** (+3 heartbeat). **El deploy del Worker (wrangler deploy + secret) queda en manos de Daniel** — hasta entonces el issue TD-14 abierto es el estado esperado. | ✅ 2026-07-12 |
 | **Sem 4 Sesiones D/E** — double-run AST (latente sin playbook critical) + cierre formal | ⏳ tras D |
 
 **Smokes E2E validados:**
@@ -101,13 +102,13 @@ El diseño completo está en **`druiz07/arbolado-app`** (privado, requiere acces
 │                                      #   arbolado-app y actualiza pr_merged del session report
 ├── cloudflare/
 │   ├── NOTES.md                       # KV namespace ID + schema + wrangler.toml template
-│   └── worker/                        # ✅ Sem 1 — 6/6 tests
-│       ├── wrangler.toml              # cron */30 + KV binding STATE
+│   └── worker/                        # ✅ Sem 1 + TD-14 heartbeat — 9/9 tests
+│       ├── wrangler.toml              # cron */30 + KV binding STATE + workers_dev=false
 │       ├── package.json               # zod + wrangler + types
 │       ├── tsconfig.json              # strict + workers-types + node
 │       ├── src/{worker,signal-schema,dependabot,normalize}.ts
-│       └── test/normalize.test.ts
-├── runner/                            # ✅ post-Sem-4-C — 328 pass / 1 skip / 0 fail
+│       └── test/{normalize,worker}.test.ts
+├── runner/                            # ✅ post-TD-15 — 446 pass / 1 skip / 0 fail
 │   ├── package.json                   # node 20 + semver + js-yaml
 │   ├── README.md
 │   ├── fixtures/sample-signal.json    # fixture canónica para smoke real

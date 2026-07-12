@@ -5,6 +5,7 @@ import {
   manifestToPackageJsonPath,
   siblingLockPath,
   resolveInstalledVersions,
+  toCaretRange,
 } from './version.js';
 
 test('parseTargetVersion: ">=1.2.3" → "1.2.3"', () => {
@@ -115,4 +116,25 @@ test('resolveInstalledVersions: paquete scoped @scope/name', () => {
 test('resolveInstalledVersions: dep ausente → []', () => {
   assert.deepEqual(resolveInstalledVersions({ packages: {} }, 'nth-check'), []);
   assert.deepEqual(resolveInstalledVersions(null, 'nth-check'), []);
+});
+
+// --- TD-15: rango caret para overrides ---
+// Un pin exacto ("0.2.6") se pudre: si un advisory posterior declara vulnerable
+// esa versión, el override del propio robot mantiene la dep clavada en ella
+// (caso real: tmp 0.2.6 puesto por PR #44 el 7-jun; advisory del 15-jun declaró
+// vulnerable >=0.2.6 <0.2.7 → 4 semanas fijada en la versión vulnerable).
+
+test('toCaretRange: "0.2.7" → "^0.2.7"', () => {
+  assert.equal(toCaretRange('0.2.7'), '^0.2.7');
+});
+
+test('toCaretRange: normaliza prefijos ("v1.2.3" → "^1.2.3")', () => {
+  assert.equal(toCaretRange('v1.2.3'), '^1.2.3');
+});
+
+test('toCaretRange: entrada no-versión → throws (incluye rangos: no doble-caret)', () => {
+  assert.throws(() => toCaretRange('^1.2.3'), /invalid version/);
+  assert.throws(() => toCaretRange('>=1.2.3'), /invalid version/);
+  assert.throws(() => toCaretRange(''), /invalid version/);
+  assert.throws(() => toCaretRange(null), /invalid version/);
 });
