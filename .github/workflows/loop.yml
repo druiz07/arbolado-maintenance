@@ -195,13 +195,22 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_ACCOUNT_ID: e4ccfa519c1e0fb94221ca6583220545
+          # wrangler sólo lee CLOUDFLARE_ACCOUNT_ID; con CF_ACCOUNT_ID a secas
+          # falla con "Authentication error [code: 10000]".
+          CLOUDFLARE_ACCOUNT_ID: e4ccfa519c1e0fb94221ca6583220545
           KV_NAMESPACE_ID: 212fe2e1b8874298ad44a9a906375033
         run: |
           mkdir -p signals-snapshot
-          wrangler kv key list \
-            --namespace-id "$KV_NAMESPACE_ID" \
-            --prefix "signal:" \
-            > signals-snapshot/keys.json || echo "[]" > signals-snapshot/keys.json
+          # Sin `|| echo "[]"`: enmascarar el fallo hacía que el artefacto de
+          # diagnóstico dijese "KV vacía" cuando estaba llena (mismo patrón que
+          # TD-4). Un snapshot que miente es peor que no tenerlo.
+          if ! wrangler kv key list \
+              --namespace-id "$KV_NAMESPACE_ID" \
+              --prefix "signal:" \
+              > signals-snapshot/keys.json; then
+            echo "::error::wrangler kv key list falló — el snapshot de señales NO es fiable"
+            exit 1
+          fi
           echo "Signals encontradas:"
           jq 'length' signals-snapshot/keys.json || true
           # Para cada key, fetch del valor — limitado a 50 para no agotar
