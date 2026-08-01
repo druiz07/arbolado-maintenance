@@ -36,10 +36,12 @@
 >
 > ⏰ **Tokens — el urgente NO es el que se venía anotando.** El "2026-08-06" que arrastraban las notas era la caducidad del PAT **viejo**; `GH_PAT_ARBOLADO_APP` se regeneró el **13-jul** (secret actualizado `2026-07-13T16:34:55Z`) y **caduca en octubre**, no en agosto.
 >
-> | Token | Secret | Caduca | |
+> | Token | Secret | **Caduca** | |
 > |---|---|---|---|
-> | `arbolado-app-dispatch-to-maintenance` | `MAINTENANCE_REPO_DISPATCH_TOKEN` (en `arbolado-app`) | ~~2026-08-09~~ → **renovado 1-ago** | 🟢 el del **feedback loop**; secret actualizado `2026-08-01T10:19:31Z`, ping 204 OK |
-> | `arbolado-maintenance-runner` | `GH_PAT_ARBOLADO_APP` (repo + Worker) | **octubre 2026** | 🟢 regenerado 13-jul, verificado 1-ago |
+> | `arbolado-app-dispatch-to-maintenance` | `MAINTENANCE_REPO_DISPATCH_TOKEN` (en `arbolado-app`) | **viernes 30-oct-2026** | 🟢 el del **feedback loop**; renovado 1-ago (iba a expirar el 9-ago), secret `2026-08-01T10:31:45Z`, ping 204 OK |
+> | `arbolado-maintenance-runner` | `GH_PAT_ARBOLADO_APP` (**repo + Worker**, dos destinos) | **domingo 11-oct-2026** | 🟢 regenerado 13-jul |
+>
+> **Fechas confirmadas por Daniel el 2026-08-01 en <https://github.com/settings/tokens?type=beta>.** El primero que vence es el **runner (11-oct)**, y es el que va a **DOS** destinos: `gh secret set GH_PAT_ARBOLADO_APP --repo druiz07/arbolado-maintenance` **y** `npx wrangler secret put GH_PAT_ARBOLADO_APP` desde `cloudflare/worker/`. Olvidar el segundo deja el detector ciego con pulso (401).
 >
 > ✅ **Cabo suelto CERRADO el mismo día:** había duda de si el `gh secret set` se ejecutó antes o después de pulsar `Regenerate` (si antes, el secret guardaría el token muerto). Daniel **volvió a guardar el secret con el token ya regenerado** → `2026-08-01T10:31:45Z`, posterior a la regeneración. El feedback loop tiene la llave buena. *Queda sin anotar la nueva fecha de caducidad elegida.*
 >
