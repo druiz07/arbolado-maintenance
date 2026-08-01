@@ -41,7 +41,13 @@
 > | `arbolado-app-dispatch-to-maintenance` | `MAINTENANCE_REPO_DISPATCH_TOKEN` (en `arbolado-app`) | ~~2026-08-09~~ → **renovado 1-ago** | 🟢 el del **feedback loop**; secret actualizado `2026-08-01T10:19:31Z`, ping 204 OK |
 > | `arbolado-maintenance-runner` | `GH_PAT_ARBOLADO_APP` (repo + Worker) | **octubre 2026** | 🟢 regenerado 13-jul, verificado 1-ago |
 >
-> ⚠️ **Cabo suelto del 1-ago:** el token del feedback loop se regeneró **y** el secret se actualizó el mismo día, pero **no se confirmó el orden**. Si el `gh secret set` se ejecutó *antes* de pulsar `Regenerate`, el secret guarda el token muerto y el feedback loop está roto en silencio. **Prueba definitiva: el primer PR del robot que se mergee** — el workflow `notify-maintenance-on-pr-merged` de `arbolado-app` debe salir verde. Si sale rojo con 401/403, es esto. Tampoco se anotó la **nueva fecha de caducidad** que se eligió al regenerar.
+> ✅ **Cabo suelto CERRADO el mismo día:** había duda de si el `gh secret set` se ejecutó antes o después de pulsar `Regenerate` (si antes, el secret guardaría el token muerto). Daniel **volvió a guardar el secret con el token ya regenerado** → `2026-08-01T10:31:45Z`, posterior a la regeneración. El feedback loop tiene la llave buena. *Queda sin anotar la nueva fecha de caducidad elegida.*
+>
+> ## 🔭 Modo vigía — decisión de Daniel, 2026-08-01
+>
+> **El robot deja de abrir PRs automáticos hasta el piloto; sigue detectando y avisando.** Motivo, con los números delante: en toda su historia lleva **42 PRs → 41 cerrados, 1 mergeado**, y de esos 42 solo **3 fueron orgánicos** (el resto, el drenado artificial de mayo). El dato que decidió: el 1-ago **las 25 alertas se cerraron con 4 `npm update`**, y el robot —cuya especialidad es fijar transitivas con `overrides`— habría abierto ~9 PRs que, según se vio en #93 y #94, **habrían sido peores que la alternativa**. Con TD-18/TD-20/TD-21 abiertos, cada PR suyo exige revisión experta: justo el trabajo que venía a ahorrar.
+>
+> **Lo que se conserva:** el **detector** (que funciona bien), el heartbeat y la alarma TD-14. **Lo que se apaga:** la apertura automática de PRs. **Se revierte** cuando arranque el piloto — que es el escenario para el que se diseñó: app en máquinas ajenas y Daniel sin tiempo. **Pendiente de implementar** (gatear en `loop.yml` los dos steps `Open auto:dry-run PR` y dejar un aviso en su lugar).
 >
 > Con **0 alertas abiertas** el robot no abrirá PRs en un tiempo ⇒ **el token del feedback loop ya no se ejercita solo con un merge**. Prueba manual sin esperar: `GH_TOKEN=<nuevo> gh api -X POST /repos/druiz07/arbolado-maintenance/dispatches -f event_type=ping` (204 = permiso `Contents: Read and write` correcto; `ping` no coincide con `pr-merged`, así que no dispara nada).
 >
