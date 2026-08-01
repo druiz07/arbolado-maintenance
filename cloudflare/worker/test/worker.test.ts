@@ -10,6 +10,7 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import worker from '../src/worker.ts';
+import type { DependabotAlert } from '../src/dependabot.ts';
 
 type Store = Map<string, string>;
 
@@ -35,6 +36,34 @@ function makeEnv(state: ReturnType<typeof makeState>) {
     TARGET_REPO_OWNER: 'druiz07',
     TARGET_REPO_NAME: 'arbolado-app',
     SIGNAL_TTL_SECONDS: '86400',
+  };
+}
+
+function alertFixture(): DependabotAlert {
+  return {
+    number: 1,
+    state: 'open',
+    dependency: {
+      package: { ecosystem: 'npm', name: 'eslint' },
+      manifest_path: 'package.json',
+      scope: 'development',
+    },
+    security_advisory: {
+      ghsa_id: 'GHSA-xxxx-xxxx-xxxx',
+      severity: 'high',
+      summary: 'eslint vuln',
+      vulnerabilities: [],
+    },
+    security_vulnerability: {
+      package: { ecosystem: 'npm', name: 'eslint' },
+      vulnerable_version_range: '< 8.56.0',
+      first_patched_version: { identifier: '8.56.0' },
+      severity: 'high',
+    },
+    created_at: '2026-05-04T00:00:00Z',
+    updated_at: '2026-05-04T00:00:00Z',
+    fixed_at: null,
+    dismissed_at: null,
   };
 }
 
@@ -86,6 +115,81 @@ describe('TD-14 heartbeat last_cycle', () => {
     assert.ok(raw, 'kill_switch apaga la emisión de señales, NO el heartbeat');
     const errors = JSON.parse(raw as string).errors as string[];
     assert.ok(errors.some((e) => e.startsWith('kill_switch_active')));
+  });
+
+  it('H.4.7 — un ciclo con alerta NO escribe signal_seen: (es del consumidor)', async () => {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify([alertFixture()]), { status: 200 })) as typeof fetch;
+    const state = makeState();
+    const res = await worker.fetch(
+      new Request('https://detector.test/run', { method: 'POST' }),
+      makeEnv(state),
+      {} as ExecutionContext,
+    );
+    const summary = (await res.json()) as { signals_written: number };
+    assert.equal(summary.signals_written, 1);
+
+    const keys = [...state.store.keys()];
+    assert.equal(keys.filter((k) => k.startsWith('signal:')).length, 1, 'debe emitir la señal');
+    assert.deepEqual(
+      keys.filter((k) => k.startsWith('signal_seen:')),
+      [],
+      'signal_seen: es del CONSUMIDOR (TTL 30d). Si el productor la escribe, loadNextSignal ' +
+        'salta la señal recién nacida y el loop no procesa nada — raíz de H.4.7',
+    );
+    assert.equal(
+      keys.filter((k) => k.startsWith('signal_emitted:')).length,
+      1,
+      'el productor lleva su propio dedup en clave separada',
+    );
+  });
+
+  it('H.4.7 — el segundo ciclo deduplica por su propia marca, sin reemitir', async () => {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify([alertFixture()]), { status: 200 })) as typeof fetch;
+    const state = makeState();
+    const env = makeEnv(state);
+    const run = async () =>
+      (await (
+        await worker.fetch(
+          new Request('https://detector.test/run', { method: 'POST' }),
+          env,
+          {} as ExecutionContext,
+        )
+      ).json()) as { signals_written: number; signals_deduped: number };
+
+    assert.equal((await run()).signals_written, 1);
+    const second = await run();
+    assert.equal(second.signals_written, 0, 'no se reemite cada 30 min');
+    assert.equal(second.signals_deduped, 1);
+  });
+
+  it('H.4.7 — no reemite una señal que el consumidor ya procesó', async () => {
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify([alertFixture()]), { status: 200 })) as typeof fetch;
+    const state = makeState();
+    const env = makeEnv(state);
+    await worker.fetch(
+      new Request('https://detector.test/run', { method: 'POST' }),
+      env,
+      {} as ExecutionContext,
+    );
+    const hash = [...state.store.keys()].find((k) => k.startsWith('signal:'))!.slice('signal:'.length);
+
+    // El runner procesó la señal y la marcó (TTL 30d); luego caducan tanto la
+    // señal como la marca propia del productor (TTL 24h).
+    state.store.delete(`signal:${hash}`);
+    state.store.delete(`signal_emitted:${hash}`);
+    state.store.set(`signal_seen:${hash}`, '1');
+
+    const res = await worker.fetch(
+      new Request('https://detector.test/run', { method: 'POST' }),
+      env,
+      {} as ExecutionContext,
+    );
+    const summary = (await res.json()) as { signals_written: number; signals_deduped: number };
+    assert.equal(summary.signals_written, 0, 'lo ya procesado no vuelve a la cola');
+    assert.equal(summary.signals_deduped, 1);
   });
 
   it('scheduled escribe last_cycle con trigger cron', async () => {

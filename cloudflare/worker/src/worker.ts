@@ -4,9 +4,10 @@
 //   1. Comprobar kill_switch en KV — si "off", retornar inmediatamente.
 //   2. Listar Dependabot alerts abiertas en arbolado-app (npm only).
 //   3. Para cada alerta: normalizar a Signal → validar zod → hash determinista.
-//   4. Si signal_seen:<hash> existe en KV (TTL 24h) → skip dup.
+//   4. Si signal_emitted:<hash> (nuestro dedup) o signal_seen:<hash> (marca
+//      del runner al procesarla) existen en KV → skip dup.
 //   5. Escribir signal:<hash> = JSON con TTL SIGNAL_TTL_SECONDS.
-//   6. Marcar signal_seen:<hash> = "1" con mismo TTL.
+//   6. Marcar signal_emitted:<hash> = "1" con mismo TTL.
 //
 // El runner en GH Actions consume signal:* a través de wrangler kv key list
 // + wrangler kv key get desde su workflow.
@@ -111,14 +112,25 @@ async function runDetectionCycle(env: Env): Promise<RunSummary> {
     }
 
     const hash = await generateSignalHash(signal);
+
+    // H.4.7 — dos dedups distintos, cada uno con su clave:
+    //   signal_emitted:<hash> — NUESTRO (TTL 24h): "ya la puse en la cola este
+    //     ciclo", evita reescribir las mismas alertas cada 30 min.
+    //   signal_seen:<hash>    — DEL CONSUMIDOR (runner, TTL 30d): "ya la
+    //     procesé". Lo leemos para no devolver a la cola algo ya resuelto,
+    //     pero NUNCA lo escribimos: el runner es su único dueño.
+    // Escribirla aquí era la causa raíz de H.4.7 — la señal nacía marcada como
+    // procesada, loadNextSignal la saltaba siempre y el loop no producía ni un
+    // PR con 25 alertas abiertas.
+    const emitted = await env.STATE.get(`signal_emitted:${hash}`);
     const seen = await env.STATE.get(`signal_seen:${hash}`);
-    if (seen) {
+    if (emitted || seen) {
       summary.signals_deduped += 1;
       continue;
     }
 
     await env.STATE.put(`signal:${hash}`, JSON.stringify(signal), { expirationTtl: ttl });
-    await env.STATE.put(`signal_seen:${hash}`, '1', { expirationTtl: ttl });
+    await env.STATE.put(`signal_emitted:${hash}`, '1', { expirationTtl: ttl });
     summary.signals_written += 1;
   }
 
