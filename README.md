@@ -2,7 +2,23 @@
 
 > Runner del **loop de mantenimiento autónomo** para [`druiz07/arbolado-app`](https://github.com/druiz07/arbolado-app) (privado). Este repo es **público** para que GitHub Actions corra con minutos ilimitados — pero contiene **cero código fuente del producto**, solo orquestación: workflows, scripts e infra notes.
 
-> ## 🔴 ESTADO 2026-07-11 — EL ROBOT ESTÁ CIEGO (NO operativo)
+> ## ✅ ESTADO 2026-08-01 — EL ROBOT YA ENTREGA (ventana supervisada por fin en marcha)
+>
+> **TD-16 cerrado: el productor marcaba como "ya procesada" cada señal que emitía.** `cloudflare/worker/src/worker.ts` escribía `signal:<hash>` **y `signal_seen:<hash>` en el mismo instante**, pero `signal_seen:` es la marca **del runner** (`runner/signal-loader/dedup.js`, TTL 30 d, *"ya la procesé"*) ⇒ `loadNextSignal` saltaba **todas** las señales y el pipeline salía entero `skipped`, en verde, con 25 alertas Dependabot abiertas.
+>
+> Evidencia: `last_cycle` = `{alerts_seen:25, signals_written:0, signals_deduped:25}` cada 30 min · **26 claves `signal:*` vivas** en KV con sus 26 `signal_seen:` de idéntico hash y expiración al segundo · **0 PRs y 0 session-reports desde el 26-jul**.
+>
+> ⇒ **Desde el despliegue del Worker (12-jul) ninguna señal orgánica había llegado al consumidor.** El único PR orgánico previo (#44) vino de un **seed manual**, y los seeds funcionaban porque **borran `signal_seen:` antes de sembrar**.
+>
+> **Fix (PR #13, worker versión `e91c2312`):** el productor lleva su propio dedup en `signal_emitted:<hash>` (TTL 24 h) y solo **lee** `signal_seen:`. **Verificado en vivo:** `signals_written` 0 → **23**, run `30693965063` success con los 4 jobs verdes, y **PRs #93 (`app-builder-lib`) y #94 (`tar`)** abiertos en `arbolado-app`, con ~22 señales más en cola.
+>
+> **También cerrado, TD-17 (PR #13 + #14):** el step `List signals` usaba `CF_ACCOUNT_ID` (wrangler solo lee `CLOUDFLARE_ACCOUNT_ID`) **y** corría `wrangler@latest` sobre **Node 20** cuando exige **≥22** — con `|| echo "[]"` tapando ambos, el artefacto decía *"KV vacía"* con 26 señales dentro. El segundo fallo solo apareció **porque** se quitó el enmascaramiento del primero.
+>
+> 🟠 **Riesgo abierto TD-18 — un `override` de npm es GLOBAL, no distingue por padre.** `builder-util-runtime` cuelga de `electron-builder` (devDep) **y de `electron-updater`, que SÍ se distribuye**; Dependabot marca ambas `development`. **Al gradar cada PR hay que mirar `npm ls <dep>`, no el campo `dependency_type`.**
+>
+> ⏰ **El PAT `GH_PAT_ARBOLADO_APP` expira el 2026-08-06** — si caduca, el detector queda ciego con pulso (401). Regenerar y actualizar **ambos** destinos (secret del repo + `wrangler secret put`).
+>
+> <details><summary>🗄️ Estado anterior — 2026-07-11, "el robot está ciego" (TD-14/TD-15, ya cerrados)</summary>
 >
 > La **revisión H.4.7** de la ventana supervisada la declaró **NO SUPERADA**. El "silencio limpio" (cron verde, 0 PRs nuevos) era un **falso negativo**:
 > - **Consumidor (`loop.yml`) SANO** — smoke E2E completo (`seed_test_signal`), incluida la guarda anti-downgrade.
@@ -12,6 +28,8 @@
 > **NO se avanza a "modo full CVEs".** Ventana **reabierta** hasta cerrar TD-14 y TD-15. Las vulnerabilidades reales ya se mitigaron a mano en `arbolado-app` (PR #56). Veredicto + tabla TD: `arbolado-app → docs/auto-maintenance/arranque-plan.md`.
 >
 > ⚠️ La fila **"✅ HITO OPERATIVO (2026-06-07)"** de la tabla de abajo queda **invalidada en cuanto a "operativo"**: el pipeline de *consumo* funciona; lo que falla es la **ingesta de señales**.
+>
+> </details>
 
 ## Qué hace este repo
 
@@ -103,7 +121,7 @@ El diseño completo está en **`druiz07/arbolado-app`** (privado, requiere acces
 │                                      #   arbolado-app y actualiza pr_merged del session report
 ├── cloudflare/
 │   ├── NOTES.md                       # KV namespace ID + schema + wrangler.toml template
-│   └── worker/                        # ✅ Sem 1 + TD-14 heartbeat — 9/9 tests
+│   └── worker/                        # ✅ Sem 1 + heartbeat TD-14 + dedup TD-16 — 12/12 tests
 │       ├── wrangler.toml              # cron */30 + KV binding STATE + workers_dev=false
 │       ├── package.json               # zod + wrangler + types
 │       ├── tsconfig.json              # strict + workers-types + node
