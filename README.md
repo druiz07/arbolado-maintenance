@@ -34,12 +34,12 @@
 >
 > 🟠 **Riesgo abierto TD-18 — un `override` de npm es GLOBAL, no distingue por padre.** `builder-util-runtime` cuelga de `electron-builder` (devDep) **y de `electron-updater`, que SÍ se distribuye**; Dependabot marca ambas `development`. **Al gradar cada PR hay que mirar `npm ls <dep>`, no el campo `dependency_type`.**
 >
-> ⏰ **Tokens — el urgente NO es el que se venía anotando.** El "2026-08-06" que arrastraban las notas era la caducidad del PAT **viejo**; `GH_PAT_ARBOLADO_APP` se regeneró el **13-jul** (secret actualizado `2026-07-13T16:34:55Z`) y su fecha real está **sin anotar**.
+> ⏰ **Tokens — el urgente NO es el que se venía anotando.** El "2026-08-06" que arrastraban las notas era la caducidad del PAT **viejo**; `GH_PAT_ARBOLADO_APP` se regeneró el **13-jul** (secret actualizado `2026-07-13T16:34:55Z`) y **caduca en octubre**, no en agosto.
 >
 > | Token | Secret | Caduca | |
 > |---|---|---|---|
 > | `arbolado-app-dispatch-to-maintenance` | `MAINTENANCE_REPO_DISPATCH_TOKEN` (en `arbolado-app`) | **2026-08-09** | 🔴 el del **feedback loop**; nunca regenerado |
-> | `arbolado-maintenance-runner` | `GH_PAT_ARBOLADO_APP` (repo + Worker) | desconocida | 🟡 regenerado 13-jul |
+> | `arbolado-maintenance-runner` | `GH_PAT_ARBOLADO_APP` (repo + Worker) | **octubre 2026** | 🟢 regenerado 13-jul, verificado 1-ago |
 >
 > Con **0 alertas abiertas** el robot no abrirá PRs en un tiempo ⇒ **el token del feedback loop ya no se ejercita solo con un merge**. Prueba manual sin esperar: `GH_TOKEN=<nuevo> gh api -X POST /repos/druiz07/arbolado-maintenance/dispatches -f event_type=ping` (204 = permiso `Contents: Read and write` correcto; `ping` no coincide con `pr-merged`, así que no dispara nada).
 >
