@@ -1,0 +1,13 @@
+{
+  "playbook_id": "bump-transitive-via-overrides",
+  "model_used": "none",
+  "diff_size": 3,
+  "tests_passed": true,
+  "pr_merged": null,
+  "retry_count": 0,
+  "policy_violations": [],
+  "classification_margin": 1,
+  "signal_hash": "19ac1873eb5e1ef86f4c41e96e9e0c3d7b87d67ac9f06abb0f005588e8f1f4c0",
+  "timestamp": "2026-08-01T09:35:15.994Z",
+  "failure_stage": "none"
+}
