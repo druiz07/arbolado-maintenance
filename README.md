@@ -10,13 +10,40 @@
 >
 > ⇒ **Desde el despliegue del Worker (12-jul) ninguna señal orgánica había llegado al consumidor.** El único PR orgánico previo (#44) vino de un **seed manual**, y los seeds funcionaban porque **borran `signal_seen:` antes de sembrar**.
 >
-> **Fix (PR #13, worker versión `e91c2312`):** el productor lleva su propio dedup en `signal_emitted:<hash>` (TTL 24 h) y solo **lee** `signal_seen:`. **Verificado en vivo:** `signals_written` 0 → **23**, run `30693965063` success con los 4 jobs verdes, y **PRs #93 (`app-builder-lib`) y #94 (`tar`)** abiertos en `arbolado-app`, con ~22 señales más en cola.
+> **Fix (PR #13, worker versión `e91c2312`):** el productor lleva su propio dedup en `signal_emitted:<hash>` (TTL 24 h) y solo **lee** `signal_seen:`. **Verificado en vivo:** `signals_written` 0 → **23**, run `30693965063` success con los 4 jobs verdes, y **PRs #93 (`app-builder-lib`) y #94 (`tar`)** abiertos en `arbolado-app` — los dos primeros PRs orgánicos de la historia del robot.
+>
+> ## ✅ Gradado hecho el mismo día — 0 vulnerabilidades y 2 deudas nuevas
+>
+> Ambos PRs **rechazados con motivo** (no por incorrectos: por **peores que la alternativa**) y sustituidos por 4 `npm update` de los paquetes padre → `arbolado-app` PR #98:
+>
+> | | antes | después |
+> |---|---|---|
+> | `electron-app` total | **12** (11 high + 1 **crítica**) | **0** |
+> | `cloudflare-worker` | **5** high | **0** |
+> | Alertas Dependabot | **25** | **0** |
+>
+> Las 25 alertas eran **9 dependencias**, y 4 updates las cerraron **sin añadir un solo override**. Cola del robot purgada de las 24 señales obsoletas; loop reactivado.
+>
+> **TD-20** — el playbook fija transitivas **sin comprobar si el padre ya admite la versión segura por su caret**. #93 forzaba `app-builder-lib@26.15.3` dejando `electron-builder` en 26.8.1: mismo monorepo, 7 minors de diferencia, en la herramienta que construye el instalador. *Propuesta de refinamiento, 1ª aparición — la regla de promoción H.4.8 pide 3.*
+>
+> **TD-21** 🔴 — los steps de validación de `loop.yml` (**727 audit · 748 tests · 758 build**) están **hardcodeados a `app/electron-app`**, aunque `runner/overrides/index.js` sí deriva el destino de `signal.path`. Una señal del `cloudflare-worker` abriría un PR afirmando *"audit limpio, tests verdes"* **sobre otro paquete**. De las 25 alertas, **2 eran del worker**.
+>
+> 💡 **Lo que salvó a #94:** había **4 advisories de `tar`** y el playbook razonó con **uno solo** (`^7.5.18`). Como TD-15 obliga a rango caret, npm resolvió a 7.5.22 y quedaron cubiertos los cuatro; **con el pin exacto anterior a TD-15, la crítica (que pedía 7.5.19) habría quedado abierta bajo un PR que afirmaba haberla resuelto**. El acierto fue del caret, no del razonamiento → es el disparador de **TD-13** (coalesce por dependencia, implementado y sin cablear) cumpliéndose.
 >
 > **También cerrado, TD-17 (PR #13 + #14):** el step `List signals` usaba `CF_ACCOUNT_ID` (wrangler solo lee `CLOUDFLARE_ACCOUNT_ID`) **y** corría `wrangler@latest` sobre **Node 20** cuando exige **≥22** — con `|| echo "[]"` tapando ambos, el artefacto decía *"KV vacía"* con 26 señales dentro. El segundo fallo solo apareció **porque** se quitó el enmascaramiento del primero.
 >
 > 🟠 **Riesgo abierto TD-18 — un `override` de npm es GLOBAL, no distingue por padre.** `builder-util-runtime` cuelga de `electron-builder` (devDep) **y de `electron-updater`, que SÍ se distribuye**; Dependabot marca ambas `development`. **Al gradar cada PR hay que mirar `npm ls <dep>`, no el campo `dependency_type`.**
 >
-> ⏰ **El PAT `GH_PAT_ARBOLADO_APP` expira el 2026-08-06** — si caduca, el detector queda ciego con pulso (401). Regenerar y actualizar **ambos** destinos (secret del repo + `wrangler secret put`).
+> ⏰ **Tokens — el urgente NO es el que se venía anotando.** El "2026-08-06" que arrastraban las notas era la caducidad del PAT **viejo**; `GH_PAT_ARBOLADO_APP` se regeneró el **13-jul** (secret actualizado `2026-07-13T16:34:55Z`) y su fecha real está **sin anotar**.
+>
+> | Token | Secret | Caduca | |
+> |---|---|---|---|
+> | `arbolado-app-dispatch-to-maintenance` | `MAINTENANCE_REPO_DISPATCH_TOKEN` (en `arbolado-app`) | **2026-08-09** | 🔴 el del **feedback loop**; nunca regenerado |
+> | `arbolado-maintenance-runner` | `GH_PAT_ARBOLADO_APP` (repo + Worker) | desconocida | 🟡 regenerado 13-jul |
+>
+> Con **0 alertas abiertas** el robot no abrirá PRs en un tiempo ⇒ **el token del feedback loop ya no se ejercita solo con un merge**. Prueba manual sin esperar: `GH_TOKEN=<nuevo> gh api -X POST /repos/druiz07/arbolado-maintenance/dispatches -f event_type=ping` (204 = permiso `Contents: Read and write` correcto; `ping` no coincide con `pr-merged`, así que no dispara nada).
+>
+> Recordatorio: `GH_PAT_ARBOLADO_APP` va a **DOS** destinos — `gh secret set … --repo druiz07/arbolado-maintenance` **y** `npx wrangler secret put …` desde `cloudflare/worker/`.
 >
 > <details><summary>🗄️ Estado anterior — 2026-07-11, "el robot está ciego" (TD-14/TD-15, ya cerrados)</summary>
 >
