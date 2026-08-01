@@ -98,7 +98,10 @@ jobs:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
-          node-version: '20'
+          # 22, no 20: `wrangler@latest` exige Node >=22 y abortaba con
+          # "Wrangler requires at least Node.js v22.0.0". Lo tapaba el
+          # `|| echo "[]"` del step List signals (TD-17).
+          node-version: '22'
       - name: Verify Cloudflare token present
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
