@@ -38,8 +38,10 @@
 >
 > | Token | Secret | Caduca | |
 > |---|---|---|---|
-> | `arbolado-app-dispatch-to-maintenance` | `MAINTENANCE_REPO_DISPATCH_TOKEN` (en `arbolado-app`) | **2026-08-09** | 🔴 el del **feedback loop**; nunca regenerado |
+> | `arbolado-app-dispatch-to-maintenance` | `MAINTENANCE_REPO_DISPATCH_TOKEN` (en `arbolado-app`) | ~~2026-08-09~~ → **renovado 1-ago** | 🟢 el del **feedback loop**; secret actualizado `2026-08-01T10:19:31Z`, ping 204 OK |
 > | `arbolado-maintenance-runner` | `GH_PAT_ARBOLADO_APP` (repo + Worker) | **octubre 2026** | 🟢 regenerado 13-jul, verificado 1-ago |
+>
+> ⚠️ **Cabo suelto del 1-ago:** el token del feedback loop se regeneró **y** el secret se actualizó el mismo día, pero **no se confirmó el orden**. Si el `gh secret set` se ejecutó *antes* de pulsar `Regenerate`, el secret guarda el token muerto y el feedback loop está roto en silencio. **Prueba definitiva: el primer PR del robot que se mergee** — el workflow `notify-maintenance-on-pr-merged` de `arbolado-app` debe salir verde. Si sale rojo con 401/403, es esto. Tampoco se anotó la **nueva fecha de caducidad** que se eligió al regenerar.
 >
 > Con **0 alertas abiertas** el robot no abrirá PRs en un tiempo ⇒ **el token del feedback loop ya no se ejercita solo con un merge**. Prueba manual sin esperar: `GH_TOKEN=<nuevo> gh api -X POST /repos/druiz07/arbolado-maintenance/dispatches -f event_type=ping` (204 = permiso `Contents: Read and write` correcto; `ping` no coincide con `pr-merged`, así que no dispara nada).
 >
