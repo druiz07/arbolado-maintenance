@@ -10,6 +10,16 @@
 #   - aplica el playbook correspondiente con Aider,
 #   - abre PR en arbolado-app con label auto:dry-run,
 #   - escribe session-report JSON commit en este repo.
+#
+# 🔭 MODO VIGÍA (activo desde 2026-08-02, decisión de Daniel del 1-ago).
+#   Variable de repo `ROBOT_MODE`:
+#     auto            → pipeline completo, abre PR auto:dry-run.
+#     watch / ausente → detecta y AVISA (issue deduplicado), NO abre PR.
+#   El default sin variable es vigía a propósito (fail-safe). El corte está en
+#   el step `Watch mode gate (ROBOT_MODE)`, justo después de cargar la señal.
+#   Se conservan detector, heartbeat y alarma TD-14 — por eso NO se deshabilita
+#   el workflow. Reactivar en el piloto:
+#     gh variable set ROBOT_MODE --body auto --repo druiz07/arbolado-maintenance
 
 name: maintenance-loop
 
@@ -449,6 +459,137 @@ jobs:
           echo success > ../workspace/state/load-signal.outcome
         continue-on-error: true
 
+      # ---------- 2a. MODO VIGÍA (variable de repo ROBOT_MODE) ----------
+      # Decisión de Daniel 2026-08-01: el robot deja de abrir PRs automáticos y
+      # pasa a DETECTAR Y AVISAR. Los números que lo decidieron: 42 PRs en toda
+      # su historia → 41 cerrados y 1 mergeado; y el 1-ago las 25 alertas
+      # abiertas se cerraron con 4 `npm update` de los PADRES, sin un solo
+      # override — justo lo contrario de lo que el robot habría propuesto
+      # (habría abierto ~9 PRs de overrides, peores que la alternativa).
+      # Con TD-18/20/21 abiertos, cada PR suyo exige revisión experta: el
+      # trabajo que venía a ahorrar.
+      #
+      # NO se deshabilita el workflow: la alarma de heartbeat TD-14 vive en el
+      # job `observe-signals` y el detector debe seguir corriendo. Lo único que
+      # se apaga es la apertura de PRs.
+      #
+      # Valores:
+      #   ROBOT_MODE=auto  → pipeline completo (clasifica, aplica, abre PR).
+      #   cualquier otro valor, o la variable SIN DEFINIR → modo vigía.
+      # El default es FAIL-SAFE a propósito: si alguien borra la variable, el
+      # robot NO vuelve solo a abrir PRs. Reactivar en el piloto exige un acto
+      # explícito:
+      #   gh variable set ROBOT_MODE --body auto --repo druiz07/arbolado-maintenance
+      #
+      # En vigía se para ANTES de clasificar: ni Gemini/Groq, ni Aider, ni CI de
+      # arbolado-app, ni session-report — trabajo que se tiraría entero. El
+      # aviso (issue deduplicado por título, mismo patrón que TD-14) SUSTITUYE
+      # al PR, y la señal se marca como vista para que la cola avance y cada
+      # dependencia genere su propio aviso en vez de repetir siempre la primera.
+      # Si el aviso NO se puede crear, la señal NO se marca vista y el run se
+      # pone en rojo: un canal de alarma roto en silencio es el fallo que ya ha
+      # mordido a este proyecto (TD-4, TD-17) — verde ≠ sano.
+      - name: Watch mode gate (ROBOT_MODE)
+        id: watch-gate
+        if: steps.load-signal.outputs.has-signal == 'true'
+        env:
+          ROBOT_MODE: ${{ vars.ROBOT_MODE }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT_ID: e4ccfa519c1e0fb94221ca6583220545
+          KV_NAMESPACE_ID: 212fe2e1b8874298ad44a9a906375033
+        working-directory: runner
+        run: |
+          MODE=$(printf '%s' "${ROBOT_MODE:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+          if [ "$MODE" = "auto" ]; then
+            echo "ROBOT_MODE=auto → pipeline completo (se abrirá PR auto:dry-run si todo pasa)."
+            echo "stop=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          echo "stop=true" >> $GITHUB_OUTPUT
+          echo "🔭 MODO VIGÍA (ROBOT_MODE='${ROBOT_MODE:-<sin definir>}') — se detecta y se avisa, NO se abre PR."
+
+          S=../workspace/intermediate/signal.json
+          DEP=$(jq -r '.dependency // "?"' "$S")
+          SEV=$(jq -r '.severity // "?"' "$S")
+          GHSA=$(jq -r '.advisory_id // "?"' "$S")
+          PATCHED=$(jq -r '.patched_versions // "sin parche publicado"' "$S")
+          VULN=$(jq -r '.vulnerable_versions // "?"' "$S")
+          DTYPE=$(jq -r '.dependency_type // "?"' "$S")
+          TRANS=$(jq -r '.is_transitive // "?"' "$S")
+          MPATH=$(jq -r '.path // "?"' "$S")
+          echo "::warning::Modo vigía — vulnerabilidad detectada en '$DEP' ($SEV, $GHSA). No se abre PR; se avisa por issue."
+
+          TITLE="[modo vigía] $DEP: vulnerabilidad detectada (sin PR automático)"
+          # Dedup por título exacto (mismo patrón que la alarma TD-14). Si la
+          # comprobación no da un número —gh caído, jq sin entrada— se falla
+          # hacia CREAR, no hacia callar: duplicar un aviso es ruido, perderlo
+          # es el fallo que ya ha mordido dos veces (TD-4, TD-17).
+          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 200 --json title \
+                 | jq --arg t "$TITLE" '[.[] | select(.title == $t)] | length' || true)
+          case "$open" in
+            ''|*[!0-9]*)
+              echo "::warning::no se pudo comprobar si el aviso ya existía (respuesta: '$open') — se intenta crear igualmente"
+              open=0
+              ;;
+          esac
+
+          if [ "$open" != "0" ]; then
+            echo "Aviso ya abierto para $DEP — no se duplica."
+          else
+            body=$(printf '%s\n' \
+              "El detector ha visto una alerta de seguridad en \`$ARBOLADO_APP_REPO\`. **El robot está en modo vigía: avisa, pero no abre PR.**" \
+              "" \
+              "| Campo | Valor |" \
+              "|---|---|" \
+              "| Dependencia | \`$DEP\` |" \
+              "| Severidad | $SEV |" \
+              "| Advisory | $GHSA |" \
+              "| Rango vulnerable | \`$VULN\` |" \
+              "| Primera versión parcheada | \`$PATCHED\` |" \
+              "| Scope declarado | $DTYPE (transitiva: $TRANS) |" \
+              "| Manifiesto | \`$MPATH\` |" \
+              "" \
+              "**Run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+              "" \
+              "## Cómo gradarlo a mano" \
+              "" \
+              "1. **Mirar el árbol real, no el campo \`dependency_type\`** (TD-18): un \`override\` de npm es GLOBAL y no distingue por padre. \`builder-util-runtime\` cuelga de \`electron-builder\` (dev) **y** de \`electron-updater\` (producción, se distribuye)." \
+              "   \`\`\`" \
+              "   cd electron-app && npm ls $DEP" \
+              "   \`\`\`" \
+              "2. **Antes de aceptar un override, comprobar si el PADRE ya lo resuelve por su caret** (TD-20). Si un ancestro declarado en \`package.json\` admite ya una versión segura, \`npm update <padre>\` es mejor: cero deuda y árbol coherente. Así se cerraron las 25 alertas del 1-ago con 4 updates y ningún override." \
+              "3. **Comprobar que el manifiesto es de \`electron-app/\`** (TD-21). Aquí es \`$MPATH\`: si no lo es, cualquier fix validado contra \`electron-app\` estaría validando OTRO paquete." \
+              "4. **Auditar por la versión resuelta en el lockfile, no por el rango de \`package.json\`** — no se pudre el rango, se pudre el lockfile." \
+              "   \`\`\`" \
+              "   cd electron-app      && npm audit --omit=dev   # lo que llega al usuario — debe ser 0" \
+              "   cd electron-app      && npm audit              # total (devDeps incluidas)" \
+              "   cd cloudflare-worker && npm audit" \
+              "   gh api \"repos/druiz07/arbolado-app/dependabot/alerts?state=open&per_page=100\" --jq 'length'" \
+              "   \`\`\`" \
+              "5. **Si el cambio toca el empaquetador o sus transitivas, \`npm run build\` NO lo valida** (solo compila Vite) → \`npm run dist:draft\`." \
+              "" \
+              "## Reactivar la apertura automática de PRs (piloto)" \
+              "" \
+              "\`\`\`" \
+              "gh variable set ROBOT_MODE --body auto --repo druiz07/arbolado-maintenance" \
+              "\`\`\`" \
+              "" \
+              "Cerrar este issue cuando la alerta esté resuelta.")
+            if gh issue create --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$body"; then
+              echo "Aviso de modo vigía creado para $DEP."
+            else
+              echo "::error::modo vigía: no se pudo crear el aviso para '$DEP' — la señal NO se marca como vista (se reintenta en el próximo run). Alarma rota = verde que miente (TD-4/TD-17)."
+              exit 1
+            fi
+          fi
+
+          # La señal se marca vista SOLO si el aviso está garantizado (creado
+          # ahora o ya abierto). Así la cola avanza ~1 dependencia por run en vez
+          # de devolver siempre la misma primera señal.
+          HASH=$(cat ../workspace/intermediate/signal-hash.txt)
+          node scripts/cli/mark-signal-seen.mjs "$HASH"
+
       # ---------- 1.b Route models (health-driven, Sem 4 router) ----------
       # Lee TODOS los session reports en docs/auto-maintenance/session-reports/,
       # computa métricas de salud (ventana 14d), y decide classifier model +
@@ -468,7 +609,8 @@ jobs:
       # (continue-on-error true), resolve-model cae al primary del playbook.
       - name: Route models (Sem 4 router, health-driven)
         id: route-models
-        if: steps.load-signal.outputs.has-signal == 'true'
+        # watch-gate: en modo vigía se corta aquí — nada de LLM, Aider ni CI.
+        if: steps.load-signal.outputs.has-signal == 'true' && steps.watch-gate.outputs.stop != 'true'
         working-directory: runner
         run: |
           node scripts/cli/route-models.mjs \
@@ -487,7 +629,9 @@ jobs:
 
       - name: Classify signal → playbook (router-driven model, top-2 margin ≥ 0.15)
         id: classify
-        if: steps.load-signal.outputs.has-signal == 'true'
+        # watch-gate: en modo vigía no se gasta cuota de Gemini clasificando algo
+        # que no va a producir ningún PR.
+        if: steps.load-signal.outputs.has-signal == 'true' && steps.watch-gate.outputs.stop != 'true'
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         working-directory: runner
@@ -824,7 +968,9 @@ jobs:
       # El report registra el failure_stage según los outcomes acumulados.
       - name: Build and write session report
         id: write-report
-        if: always() && steps.load-signal.outputs.has-signal == 'true'
+        # watch-gate: en modo vigía no hay pipeline que reportar (ni se commitea
+        # un session-report cada 30 min por un trabajo que no se ha hecho).
+        if: always() && steps.load-signal.outputs.has-signal == 'true' && steps.watch-gate.outputs.stop != 'true'
         working-directory: runner
         run: |
           node scripts/cli/build-and-write-report.mjs .. \
@@ -888,7 +1034,11 @@ jobs:
         # (Open auto:dry-run PR (override)) — sin el gate kind=='aider' este
         # step dispararía también para overrides y abriría un PR con rama y
         # cuerpo de bump-devdep-cve sobre cambios de override (PR duplicado).
-        if: always() && steps.write-report.outcome == 'success' && steps.detect-playbook.outputs.kind == 'aider'
+        #
+        # MODO VIGÍA: redundante con `watch-gate` (que ya corta antes de
+        # write-report), y a propósito. Es el step que de verdad abre el PR:
+        # si alguien reordena el pipeline, la condición tiene que seguir aquí.
+        if: always() && steps.write-report.outcome == 'success' && steps.detect-playbook.outputs.kind == 'aider' && steps.watch-gate.outputs.stop != 'true'
         env:
           GH_TOKEN: ${{ secrets.GH_PAT_ARBOLADO_APP }}
         working-directory: app
@@ -932,7 +1082,8 @@ jobs:
       # runtime deps nunca auto-publicadas; Daniel revisa y mergea).
       - name: Open auto:dry-run PR (override) in arbolado-app
         id: open-pr-override
-        if: always() && steps.write-report.outcome == 'success' && steps.detect-playbook.outputs.kind == 'override'
+        # MODO VIGÍA: mismo cinturón redundante que en el step de Aider.
+        if: always() && steps.write-report.outcome == 'success' && steps.detect-playbook.outputs.kind == 'override' && steps.watch-gate.outputs.stop != 'true'
         env:
           GH_TOKEN: ${{ secrets.GH_PAT_ARBOLADO_APP }}
         working-directory: app

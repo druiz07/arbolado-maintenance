@@ -49,7 +49,27 @@
 >
 > **El robot deja de abrir PRs automáticos hasta el piloto; sigue detectando y avisando.** Motivo, con los números delante: en toda su historia lleva **42 PRs → 41 cerrados, 1 mergeado**, y de esos 42 solo **3 fueron orgánicos** (el resto, el drenado artificial de mayo). El dato que decidió: el 1-ago **las 25 alertas se cerraron con 4 `npm update`**, y el robot —cuya especialidad es fijar transitivas con `overrides`— habría abierto ~9 PRs que, según se vio en #93 y #94, **habrían sido peores que la alternativa**. Con TD-18/TD-20/TD-21 abiertos, cada PR suyo exige revisión experta: justo el trabajo que venía a ahorrar.
 >
-> **Lo que se conserva:** el **detector** (que funciona bien), el heartbeat y la alarma TD-14. **Lo que se apaga:** la apertura automática de PRs. **Se revierte** cuando arranque el piloto — que es el escenario para el que se diseñó: app en máquinas ajenas y Daniel sin tiempo. **Pendiente de implementar** (gatear en `loop.yml` los dos steps `Open auto:dry-run PR` y dejar un aviso en su lugar).
+> **Lo que se conserva:** el **detector** (que funciona bien), el heartbeat y la alarma TD-14. **Lo que se apaga:** la apertura automática de PRs. **Se revierte** cuando arranque el piloto — que es el escenario para el que se diseñó: app en máquinas ajenas y Daniel sin tiempo.
+>
+> ### ✅ Implementado el 2026-08-02 — variable de repo `ROBOT_MODE`
+>
+> | Valor de `ROBOT_MODE` | Qué hace |
+> |---|---|
+> | `auto` | Pipeline completo: clasifica, aplica el playbook y **abre PR** `auto:dry-run`. |
+> | `watch`, cualquier otro valor, **o la variable sin definir** | 🔭 **Vigía**: detecta y **avisa**, no abre PR. |
+>
+> **El default sin variable es vigía a propósito (fail-safe):** si alguien borra la variable, el robot **no** vuelve solo a abrir PRs. Reactivar exige un acto explícito:
+>
+> ```bash
+> gh variable set ROBOT_MODE --body auto --repo druiz07/arbolado-maintenance   # reactivar (piloto)
+> gh variable get ROBOT_MODE --repo druiz07/arbolado-maintenance               # consultar el modo actual
+> ```
+>
+> **Dónde está el corte:** step `Watch mode gate (ROBOT_MODE)` de `loop.yml`, justo después de `Load next unseen signal`. Se para **antes de clasificar**: ni Gemini/Groq, ni Aider, ni CI de `arbolado-app`, ni session-report — trabajo que se tiraría entero. Los dos steps `Open auto:dry-run PR` llevan además la misma condición de forma redundante y deliberada: son los que de verdad abren el PR.
+>
+> **El aviso sustituye al PR:** un issue en este repo, **deduplicado por título exacto** (mismo patrón que la alarma TD-14), titulado `[modo vigía] <dep>: vulnerabilidad detectada (sin PR automático)`. Lleva la ficha de la alerta y el guion de gradado a mano (TD-18 `npm ls`, TD-20 padre-antes-que-override, TD-21 comprobar el manifiesto, `--omit=dev` vs total, `npm run dist:draft`).
+>
+> **La señal se marca vista solo si el aviso está garantizado**, para que la cola avance ~1 dependencia por run en vez de repetir siempre la primera. Si el aviso **no** se puede crear, la señal **no** se marca y el run se pone **en rojo**: una alarma rota en silencio es exactamente el fallo que ya mordió en TD-4 y TD-17 — verde ≠ sano.
 >
 > Con **0 alertas abiertas** el robot no abrirá PRs en un tiempo ⇒ **el token del feedback loop ya no se ejercita solo con un merge**. Prueba manual sin esperar: `GH_TOKEN=<nuevo> gh api -X POST /repos/druiz07/arbolado-maintenance/dispatches -f event_type=ping` (204 = permiso `Contents: Read and write` correcto; `ping` no coincide con `pr-merged`, así que no dispara nada).
 >
@@ -75,6 +95,8 @@ Periódicamente (cron) ejecuta este pipeline:
 ```
 Worker (detector, en Cloudflare)
     ↓ signal.json validado por schema
+🔭 Watch mode gate (ROBOT_MODE) — si NO es 'auto', corta aquí y avisa por issue
+    ↓ solo con ROBOT_MODE=auto
 Classifier LLM (Gemini Flash, top-2 margin ≥ 0.15)
     ↓ playbook_id + confidence
 Policy Engine (JS local, validación AST — sin LLM)
@@ -264,6 +286,7 @@ gh workflow run maintenance-loop --repo druiz07/arbolado-maintenance -f seed_dep
 
 El job `apply-playbooks` corre en cron `*/30` (cada 30 min) desde 2026-05-16 (antes horario desde 2026-05-10; L2 aceleración, alineado con el Worker `*/30`). Cada ejecución:
 1. lee KV (`signal:*`), salta los ya marcados (`signal_seen:<hash>`),
+1-bis. 🔭 **watch-gate** (`ROBOT_MODE`): si no es `auto`, **abre el aviso, marca la señal vista y para aquí** — los pasos 2-9 quedan en `skipped`,
 2. **route-models** (Sem 4 C) lee health metrics + decide modelo+promptVariant,
 3. classifier (Gemini Flash o Pro según router) elige playbook con top-2 margin ≥ 0.15,
 4. **check-dep-precondition** (Sem 4 C, TD-1) bloquea si la dep no existe en `package.json`,
