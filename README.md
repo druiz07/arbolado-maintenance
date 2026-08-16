@@ -2,141 +2,86 @@
 
 > Runner del **loop de mantenimiento autónomo** para [`druiz07/arbolado-app`](https://github.com/druiz07/arbolado-app) (privado). Este repo es **público** para que GitHub Actions corra con minutos ilimitados — pero contiene **cero código fuente del producto**, solo orquestación: workflows, scripts e infra notes.
 
-> ## ⛔ ESTADO 2026-08-16 — EL ROBOT ESTÁ JUBILADO. La vigilancia vive ahora en `arbolado-app`.
+> # ⛔ ESTADO: JUBILADO (2026-08-16)
 >
-> **El `schedule` de `maintenance-loop` se ha retirado.** El repositorio se conserva entero —playbooks, classifier, router, policy engine, runner y sus tests— como **archivo**, y el workflow sigue lanzable a mano (`workflow_dispatch`).
+> **Este repositorio ya no ejecuta nada por su cuenta.** Se retiró el `schedule` de `maintenance-loop` (PR #26); todo lo demás —playbooks, classifier, router, policy engine, runner y sus tests— se conserva **intacto como archivo** y solo corre si alguien lo lanza a mano.
 >
-> **Por qué.** Dos números y una avería:
+> **La vigilancia de vulnerabilidades vive ahora en `arbolado-app`**, en un workflow diario que hace `npm audit` sobre el propio repositorio **sin ninguna credencial**: `.github/workflows/vigia-vulnerabilidades.yml` + `scripts/vigia-vulnerabilidades.mjs`.
 >
-> - **42 PRs en toda su vida: 41 cerrados, 1 mergeado.** El 1-ago las 25 alertas abiertas se cerraron con **4 `npm update` de los padres y ningún override**, justo lo contrario de lo que él habría propuesto (~9 PRs de overrides). Ese día pasó a modo vigía.
-> - **Del 10 al 16 de agosto estuvo ciego y en verde.** Caducó el token de API de Cloudflare; el loader reventaba con `SignalLoaderKvError: KV listKeys 401`, pero `continue-on-error: true` lo marcaba verde, el gate se saltaba por condición, el snapshot decía *"Signals encontradas: 0"* y **la alarma TD-14 no disparó** porque un 401 cae en la rama *"transitorio, sin issue"*. Mientras tanto entró `js-yaml` (**alta, runtime**, 11-ago), que viajaba dentro del `.exe`, y nadie se enteró en 6 días.
+> ## Por qué
 >
-> **Cuarto fallo de su historia, y los cuatro —TD-14, TD-16, TD-17 y este— en la misma fontanería: Worker + KV + token.** Un vigía cuyo modo de fallo es callarse y ponerse verde es peor que no tener vigía, porque se confía en su silencio.
+> **1. Lo que producía no compensaba.** 42 PRs en toda su vida → **41 cerrados, 1 mergeado**. El 1-ago las 25 alertas abiertas se cerraron con **4 `npm update` de los paquetes padre y ningún override**, justo lo contrario de lo que él habría propuesto (~9 PRs de overrides). El 16-ago la vulnerabilidad de producción se arregló **exactamente igual**.
 >
-> **Dónde mirar ahora:** `druiz07/arbolado-app` → `.github/workflows/vigia-vulnerabilidades.yml` y `scripts/vigia-vulnerabilidades.mjs`. Hace `npm audit` sobre el propio repositorio, **sin ninguna credencial**, distingue de verdad lo que llega al usuario de lo que no (TD-18/TD-21) y **se pone rojo** tanto si algo que se distribuye está afectado como si no puede auditar. Ejecutable a mano: `node scripts/vigia-vulnerabilidades.mjs --dry-run`.
+> **2. La mitad que sí valía —enterarse— tampoco la estaba dando.** Del **10 al 16 de agosto estuvo ciego y en verde**: caducó `CLOUDFLARE_API_TOKEN`, el loader empezó a reventar con `SignalLoaderKvError: KV listKeys 401` y **tres disfraces lo convirtieron en calma**:
 >
-> **Efecto colateral bueno:** al parar el loop, los PAT que vencían en octubre (`arbolado-maintenance-runner` 11-oct, `arbolado-app-dispatch-to-maintenance` 30-oct) **dejan de importar**. No hay nada que renovar.
->
-> **Para resucitarlo** hacen falta tres cosas, no una: (1) regenerar `CLOUDFLARE_API_TOKEN`, (2) devolver el `schedule` en `loop.yml`, (3) `gh variable set ROBOT_MODE --body auto`. Y antes, tapar los tres disfraces que lo dejaron mentir en verde (el `continue-on-error` del loader, el 401 tratado como transitorio, y `wrangler@latest` sin fijar) y cerrar TD-18/TD-20/TD-21.
-
-<details>
-<summary>🗄️ Histórico anterior (contexto, ya superado por lo de arriba)</summary>
-
-> ## ✅ ESTADO 2026-08-01 — EL ROBOT YA ENTREGA (ventana supervisada por fin en marcha)
->
-> **TD-16 cerrado: el productor marcaba como "ya procesada" cada señal que emitía.** `cloudflare/worker/src/worker.ts` escribía `signal:<hash>` **y `signal_seen:<hash>` en el mismo instante**, pero `signal_seen:` es la marca **del runner** (`runner/signal-loader/dedup.js`, TTL 30 d, *"ya la procesé"*) ⇒ `loadNextSignal` saltaba **todas** las señales y el pipeline salía entero `skipped`, en verde, con 25 alertas Dependabot abiertas.
->
-> Evidencia: `last_cycle` = `{alerts_seen:25, signals_written:0, signals_deduped:25}` cada 30 min · **26 claves `signal:*` vivas** en KV con sus 26 `signal_seen:` de idéntico hash y expiración al segundo · **0 PRs y 0 session-reports desde el 26-jul**.
->
-> ⇒ **Desde el despliegue del Worker (12-jul) ninguna señal orgánica había llegado al consumidor.** El único PR orgánico previo (#44) vino de un **seed manual**, y los seeds funcionaban porque **borran `signal_seen:` antes de sembrar**.
->
-> **Fix (PR #13, worker versión `e91c2312`):** el productor lleva su propio dedup en `signal_emitted:<hash>` (TTL 24 h) y solo **lee** `signal_seen:`. **Verificado en vivo:** `signals_written` 0 → **23**, run `30693965063` success con los 4 jobs verdes, y **PRs #93 (`app-builder-lib`) y #94 (`tar`)** abiertos en `arbolado-app` — los dos primeros PRs orgánicos de la historia del robot.
->
-> ## ✅ Gradado hecho el mismo día — 0 vulnerabilidades y 2 deudas nuevas
->
-> Ambos PRs **rechazados con motivo** (no por incorrectos: por **peores que la alternativa**) y sustituidos por 4 `npm update` de los paquetes padre → `arbolado-app` PR #98:
->
-> | | antes | después |
+> | # | Disfraz | Efecto |
 > |---|---|---|
-> | `electron-app` total | **12** (11 high + 1 **crítica**) | **0** |
-> | `cloudflare-worker` | **5** high | **0** |
-> | Alertas Dependabot | **25** | **0** |
+> | **TD-22** | `continue-on-error: true` en `Load next unseen signal` | El step se marca **success** pese al `exit 1`; `signal-load.json` queda a **0 bytes**; la salida `has-signal` sale **vacía** y el gate `if: … == 'true'` se salta. Run verde |
+> | **TD-23** | La alarma TD-14 trata **cualquier HTTP ≠ 200/404 como transitorio** | Un **401 es credencial muerta, no red**. La alarma que existe para *"el robot está ciego"* fue ciega justo a eso |
+> | (TD-17 otra vez) | El snapshot imprime `Signals encontradas: 0` | Un informe que miente. Tercera repetición del patrón TD-4/TD-17 |
 >
-> Las 25 alertas eran **9 dependencias**, y 4 updates las cerraron **sin añadir un solo override**. Cola del robot purgada de las 24 señales obsoletas; loop reactivado.
+> En esos 6 días entró **`js-yaml` (alta y de runtime, 11-ago)**, que colgaba de `electron-updater` y **viajaba dentro del `.exe` que instalan los técnicos**, y `extract-zip` (13-ago). **Cero avisos.**
 >
-> **TD-20** — el playbook fija transitivas **sin comprobar si el padre ya admite la versión segura por su caret**. #93 forzaba `app-builder-lib@26.15.3` dejando `electron-builder` en 26.8.1: mismo monorepo, 7 minors de diferencia, en la herramienta que construye el instalador. *Propuesta de refinamiento, 1ª aparición — la regla de promoción H.4.8 pide 3.*
+> **3. Los cuatro fallos de su historia —TD-14, TD-16, TD-17 y este— están en la misma fontanería: Worker + KV + token.** Un vigía cuyo modo de fallo es callarse y ponerse verde **es peor que no tener vigía**, porque se confía en su silencio.
 >
-> **TD-21** 🔴 — los steps de validación de `loop.yml` (**727 audit · 748 tests · 758 build**) están **hardcodeados a `app/electron-app`**, aunque `runner/overrides/index.js` sí deriva el destino de `signal.path`. Una señal del `cloudflare-worker` abriría un PR afirmando *"audit limpio, tests verdes"* **sobre otro paquete**. De las 25 alertas, **2 eran del worker**.
+> ## Qué hay que hacer para resucitarlo
 >
-> 💡 **Lo que salvó a #94:** había **4 advisories de `tar`** y el playbook razonó con **uno solo** (`^7.5.18`). Como TD-15 obliga a rango caret, npm resolvió a 7.5.22 y quedaron cubiertos los cuatro; **con el pin exacto anterior a TD-15, la crítica (que pedía 7.5.19) habría quedado abierta bajo un PR que afirmaba haberla resuelto**. El acierto fue del caret, no del razonamiento → es el disparador de **TD-13** (coalesce por dependencia, implementado y sin cablear) cumpliéndose.
+> **Tres cosas, no una:**
 >
-> **También cerrado, TD-17 (PR #13 + #14):** el step `List signals` usaba `CF_ACCOUNT_ID` (wrangler solo lee `CLOUDFLARE_ACCOUNT_ID`) **y** corría `wrangler@latest` sobre **Node 20** cuando exige **≥22** — con `|| echo "[]"` tapando ambos, el artefacto decía *"KV vacía"* con 26 señales dentro. El segundo fallo solo apareció **porque** se quitó el enmascaramiento del primero.
+> 1. Regenerar **`CLOUDFLARE_API_TOKEN`** (el actual está muerto desde el 10-ago) y ponerlo como secret del repo.
+> 2. Descomentar el `schedule` en [`.github/workflows/loop.yml`](.github/workflows/loop.yml) (queda escrito tal cual estaba).
+> 3. `gh variable set ROBOT_MODE --body auto --repo druiz07/arbolado-maintenance`.
 >
-> 🟠 **Riesgo abierto TD-18 — un `override` de npm es GLOBAL, no distingue por padre.** `builder-util-runtime` cuelga de `electron-builder` (devDep) **y de `electron-updater`, que SÍ se distribuye**; Dependabot marca ambas `development`. **Al gradar cada PR hay que mirar `npm ls <dep>`, no el campo `dependency_type`.**
->
-> ⏰ **Tokens — el urgente NO es el que se venía anotando.** El "2026-08-06" que arrastraban las notas era la caducidad del PAT **viejo**; `GH_PAT_ARBOLADO_APP` se regeneró el **13-jul** (secret actualizado `2026-07-13T16:34:55Z`) y **caduca en octubre**, no en agosto.
->
-> | Token | Secret | **Caduca** | |
-> |---|---|---|---|
-> | `arbolado-app-dispatch-to-maintenance` | `MAINTENANCE_REPO_DISPATCH_TOKEN` (en `arbolado-app`) | **viernes 30-oct-2026** | 🟢 el del **feedback loop**; renovado 1-ago (iba a expirar el 9-ago), secret `2026-08-01T10:31:45Z`, ping 204 OK |
-> | `arbolado-maintenance-runner` | `GH_PAT_ARBOLADO_APP` (**repo + Worker**, dos destinos) | **domingo 11-oct-2026** | 🟢 regenerado 13-jul |
->
-> **Fechas confirmadas por Daniel el 2026-08-01 en <https://github.com/settings/tokens?type=beta>.** El primero que vence es el **runner (11-oct)**, y es el que va a **DOS** destinos: `gh secret set GH_PAT_ARBOLADO_APP --repo druiz07/arbolado-maintenance` **y** `npx wrangler secret put GH_PAT_ARBOLADO_APP` desde `cloudflare/worker/`. Olvidar el segundo deja el detector ciego con pulso (401).
->
-> ✅ **Cabo suelto CERRADO el mismo día:** había duda de si el `gh secret set` se ejecutó antes o después de pulsar `Regenerate` (si antes, el secret guardaría el token muerto). Daniel **volvió a guardar el secret con el token ya regenerado** → `2026-08-01T10:31:45Z`, posterior a la regeneración. El feedback loop tiene la llave buena. *Queda sin anotar la nueva fecha de caducidad elegida.*
->
-> ## 🔭 Modo vigía — decisión de Daniel, 2026-08-01
->
-> **El robot deja de abrir PRs automáticos hasta el piloto; sigue detectando y avisando.** Motivo, con los números delante: en toda su historia lleva **42 PRs → 41 cerrados, 1 mergeado**, y de esos 42 solo **3 fueron orgánicos** (el resto, el drenado artificial de mayo). El dato que decidió: el 1-ago **las 25 alertas se cerraron con 4 `npm update`**, y el robot —cuya especialidad es fijar transitivas con `overrides`— habría abierto ~9 PRs que, según se vio en #93 y #94, **habrían sido peores que la alternativa**. Con TD-18/TD-20/TD-21 abiertos, cada PR suyo exige revisión experta: justo el trabajo que venía a ahorrar.
->
-> **Lo que se conserva:** el **detector** (que funciona bien), el heartbeat y la alarma TD-14. **Lo que se apaga:** la apertura automática de PRs. **Se revierte** cuando arranque el piloto — que es el escenario para el que se diseñó: app en máquinas ajenas y Daniel sin tiempo.
->
-> ### ✅ Implementado el 2026-08-02 — variable de repo `ROBOT_MODE`
->
-> | Valor de `ROBOT_MODE` | Qué hace |
-> |---|---|
-> | `auto` | Pipeline completo: clasifica, aplica el playbook y **abre PR** `auto:dry-run`. |
-> | `watch`, cualquier otro valor, **o la variable sin definir** | 🔭 **Vigía**: detecta y **avisa**, no abre PR. |
->
-> **El default sin variable es vigía a propósito (fail-safe):** si alguien borra la variable, el robot **no** vuelve solo a abrir PRs. Reactivar exige un acto explícito:
->
-> ```bash
-> gh variable set ROBOT_MODE --body auto --repo druiz07/arbolado-maintenance   # reactivar (piloto)
-> gh variable get ROBOT_MODE --repo druiz07/arbolado-maintenance               # consultar el modo actual
-> ```
->
-> **Dónde está el corte:** step `Watch mode gate (ROBOT_MODE)` de `loop.yml`, justo después de `Load next unseen signal`. Se para **antes de clasificar**: ni Gemini/Groq, ni Aider, ni CI de `arbolado-app`, ni session-report — trabajo que se tiraría entero. Los dos steps `Open auto:dry-run PR` llevan además la misma condición de forma redundante y deliberada: son los que de verdad abren el PR.
->
-> **El aviso sustituye al PR:** un issue en este repo, **deduplicado por título exacto** (mismo patrón que la alarma TD-14), titulado `[modo vigía] <dep>: vulnerabilidad detectada (sin PR automático)`. Lleva la ficha de la alerta y el guion de gradado a mano (TD-18 `npm ls`, TD-20 padre-antes-que-override, TD-21 comprobar el manifiesto, `--omit=dev` vs total, `npm run dist:draft`).
->
-> **La señal se marca vista solo si el aviso está garantizado**, para que la cola avance ~1 dependencia por run en vez de repetir siempre la primera. Si el aviso **no** se puede crear, la señal **no** se marca y el run se pone **en rojo**: una alarma rota en silencio es exactamente el fallo que ya mordió en TD-4 y TD-17 — verde ≠ sano.
->
-> Con **0 alertas abiertas** el robot no abrirá PRs en un tiempo ⇒ **el token del feedback loop ya no se ejercita solo con un merge**. Prueba manual sin esperar: `GH_TOKEN=<nuevo> gh api -X POST /repos/druiz07/arbolado-maintenance/dispatches -f event_type=ping` (204 = permiso `Contents: Read and write` correcto; `ping` no coincide con `pr-merged`, así que no dispara nada).
->
-> Recordatorio: `GH_PAT_ARBOLADO_APP` va a **DOS** destinos — `gh secret set … --repo druiz07/arbolado-maintenance` **y** `npx wrangler secret put …` desde `cloudflare/worker/`.
->
-> <details><summary>🗄️ Estado anterior — 2026-07-11, "el robot está ciego" (TD-14/TD-15, ya cerrados)</summary>
->
-> La **revisión H.4.7** de la ventana supervisada la declaró **NO SUPERADA**. El "silencio limpio" (cron verde, 0 PRs nuevos) era un **falso negativo**:
-> - **Consumidor (`loop.yml`) SANO** — smoke E2E completo (`seed_test_signal`), incluida la guarda anti-downgrade.
-> - **KV de señales VACÍA (`[]`)** habiendo **23 alertas Dependabot abiertas** en `arbolado-app` (1 crítica, 8 high) → **el productor (`cloudflare/worker`, `arbolado-maintenance-detector`) no emite** = **TD-14 (crítico)**.
-> - El override `tmp: 0.2.6` que puso el propio robot (PR #44) **clavaba la versión vulnerable** (advisory del 15-jun) y no lo refrescó = **TD-15**: los overrides con **pin exacto se pudren**.
->
-> **NO se avanza a "modo full CVEs".** Ventana **reabierta** hasta cerrar TD-14 y TD-15. Las vulnerabilidades reales ya se mitigaron a mano en `arbolado-app` (PR #56). Veredicto + tabla TD: `arbolado-app → docs/auto-maintenance/arranque-plan.md`.
->
-> ⚠️ La fila **"✅ HITO OPERATIVO (2026-06-07)"** de la tabla de abajo queda **invalidada en cuanto a "operativo"**: el pipeline de *consumo* funciona; lo que falla es la **ingesta de señales**.
->
-> </details>
+> **Y antes de eso**, tapar **TD-22, TD-23 y TD-24** (los tres de la autopsia) y cerrar **TD-20**. Los cinco están con disparador objetivo en `arbolado-app:docs/auto-maintenance/arranque-plan.md`.
 
-</details>
+## Estado actual de cada pieza — sin cabos sueltos
 
-## Qué hace este repo
+| Pieza | Estado hoy | Qué implica |
+|---|---|---|
+| **`maintenance-loop`** (workflow) | 🟡 **Sin cron.** Solo `workflow_dispatch` | No corre solo. Ojo: al no haber cron, **los tests del runner y del Worker solo se ejecutan si lo lanzas a mano** |
+| **`pr-merged-listener`** (workflow) | 🟡 **Dormido.** Sigue activo pero nunca se dispara | Escucha `repository_dispatch` desde `arbolado-app`, que solo lo emite para PRs con label `auto:dry-run`. Como el robot ya no abre PRs, **no llegará ninguno** |
+| **Worker `arbolado-maintenance-detector`** (Cloudflare) | 🟠 **Sigue desplegado y con su cron `*/30`** | Escribe señales en la KV **que ya no lee nadie**. No hace daño y no cuesta dinero (free tier), pero es basura: conviene **borrarlo desde el panel de Cloudflare** |
+| **KV namespace `212fe2e1…`** | 🟠 Vivo, con señales que expiran solas (TTL 24 h) y `last_cycle` sin TTL | Se puede borrar junto con el Worker |
+| **`CLOUDFLARE_API_TOKEN`** (secret) | 🔴 **MUERTO** — devuelve 401 desde el 10-ago | Es lo que dejó ciego al robot. **Hay que regenerarlo si se resucita**; hoy no hace falta para nada |
+| **`GH_PAT_ARBOLADO_APP`** (secret del repo **y** del Worker) | 🟡 Vivo, caduca **11-oct-2026** | **Ya no importa**: nada lo usa. No hay que renovarlo |
+| **`MAINTENANCE_REPO_DISPATCH_TOKEN`** (en `arbolado-app`) | 🟡 Vivo, caduca **30-oct-2026** | **Ya no importa** por lo mismo |
+| **`GEMINI_API_KEY` / `GROQ_API_KEY`** (secrets) | 🟡 Vivos, sin uso | El pipeline que los consumía no corre. Cero gasto |
+| **Variable `ROBOT_MODE`** | `watch` | Irrelevante mientras no haya cron. Sigue siendo el interruptor si se resucita (**`auto` = abre PRs; cualquier otro valor o ausente = no**, default fail-safe a propósito) |
+| **Issues del repo** | ✅ **0 abiertos** | Los tres avisos de modo vigía (#23 `undici`, #24 `nanoid`, #25 `electron`) se cerraron el 16-ago al quedar resueltas las vulnerabilidades |
+| **PRs del repo** | ✅ **0 abiertos**, 0 ramas huérfanas | — |
+| **Alertas Dependabot de `arbolado-app`** | ✅ **0 abiertas** | Los tres audits (app `--omit=dev`, app total, worker) están a 0 desde el 16-ago |
 
-> ⛔ **Ya no lo hace por su cuenta**: el `schedule` se retiró el 2026-08-16 y esto queda como descripción de la maquinaria archivada. Solo corre si se lanza a mano.
+> 💡 **El aviso #24 (`nanoid`) nunca fue real:** su advisory era `GHSA-td12-override-smoke`, una señal sembrada del smoke test de TD-12 que se quedó en la cola. De los tres avisos que llegó a emitir el modo vigía, **dos fueron de verdad**.
 
-Periódicamente (cron) ejecutaba este pipeline:
+## Qué hacía este repo
+
+> ⛔ En pasado a propósito: esto describe la maquinaria archivada.
 
 ```
-Worker (detector, en Cloudflare)
-    ↓ signal.json validado por schema
-🔭 Watch mode gate (ROBOT_MODE) — si NO es 'auto', corta aquí y avisa por issue
+Worker (detector, en Cloudflare)              ← cron */30, escribía signal:<hash> en KV
+    ↓ signal.json validado por schema (zod)
+Load next unseen signal (runner)              ← leía la KV y saltaba las ya vistas
+    ↓
+🔭 Watch mode gate (ROBOT_MODE)                ← si NO es 'auto': avisa por issue y para aquí
     ↓ solo con ROBOT_MODE=auto
 Classifier LLM (Gemini Flash, top-2 margin ≥ 0.15)
     ↓ playbook_id + confidence
 Policy Engine (JS local, validación AST — sin LLM)
-    ↓ valida constraints semánticos
-Router LLM (health-scored)
-    ↓ elige proveedor sano
-Aider (executor, scope cerrado)
+    ↓
+Router LLM (health-scored)                    ← elegía proveedor sano según histórico
+    ↓
+Aider (executor, scope cerrado)               ← o el módulo de overrides, determinista y sin LLM
     ↓ diff acotado
 CI (npm test + npm run build) → PR en arbolado-app con label auto:dry-run
     ↓
 Session report estructurado (commit en este repo)
 ```
 
-Stack 0 € — Aider + Groq Kimi K2 + Gemini Flash + Cloudflare Workers + GH Actions, todos free tier.
+Stack 0 € — Aider + **Groq (`openai/gpt-oss-120b`)** + Gemini Flash + Cloudflare Workers + GH Actions, todos free tier. **Nunca usó Claude ni consumió cuota de Anthropic.**
 
-## Estado
+> ⚠️ Nota histórica: durante un tiempo la documentación decía "Groq Kimi K2". Era un modelo real de Moonshot que Groq retiró; se sustituyó por el ID real el 2026-05-14.
+
+## Estado por fases (histórico completo)
 
 | Fase | Estado |
 |---|---|
@@ -147,206 +92,144 @@ Stack 0 € — Aider + Groq Kimi K2 + Gemini Flash + Cloudflare Workers + GH Ac
 | **Sem 3** — classifier real Gemini Flash con top-2 margin ≥ 0.15 + activar cron horario | ✅ 2026-05-10 |
 | **Sem 4 Sesión B** — feedback loop `update-on-merge` (TD-8): notify→dispatch→listener→update-merge | ✅ 2026-05-11 |
 | **Sem 4 Sesión C** — TD-1 estructural (preconditions/dep-exists) + health-scorer + router + Task 12 wire en `loop.yml` | ✅ 2026-05-12 |
-| **Sem 4 Sesión A** — alias resolution (TD-7): `runner/alias-resolver/` + step `Resolve model alias` en `loop.yml`; `AIDER_MODEL` ahora router-driven sin hardcoded fallback | ✅ 2026-05-14 |
-| **Refactor post-Sesión-A** — `KNOWN_ALIASES` vaciada (Kimi K2 era modelo real de Moonshot retirado por Groq, no un mote); playbook cambió a `groq/openai/gpt-oss-120b` real | ✅ 2026-05-14 |
-| **Sem 4 Sesión F** — validación con dataset real Dependabot (~3 h): módulo `runner/dependabot/` + 2 CLIs + dry-run batch sobre 59 alertas (open + fixed) | ✅ 2026-05-14 — hallazgos abstractos abajo |
-| **P1 (TD-11)** — playbook nuevo `bump-transitive-via-overrides` (cierra el gap del 70 % transitives): `runner/overrides/` determinista sin Aider + CLI offline. Adelanto proactivo (disparador ≥10 open NO cumplido) | ✅ 2026-05-15 |
-| **TD-12** — `bump-transitive-via-overrides` **cableado en `loop.yml`**: branching `Detect playbook kind` + `Apply override` (wrapper `apply-override.mjs` IO real) + `report-bridge.js` (report unificado) + issue `parent_strict_range` + PR override. **Ambos extremos validados con npm real:** rollback (`25928776319`) + **applied → PR `#2`** (`25929991172`) + regresión Aider (`25928876870`). Bug cwd del módulo P1 destapado y corregido (+2 tests). Suite **412→424**. Adelanto proactivo | ✅ 2026-05-15 |
-| **3 fixes dry-run-hardening (G.5)** — el drenado L1 (36 PRs `auto:dry-run` stale-replay, todos rechazados) destapó 3 fallos bloqueantes del playbook override → robot pausado por contrato. Corregidos TDD: **(1) guardia anti-downgrade** (`resolveInstalledVersions` + `skipped/already_safe` si instalado ≥ patched), **(2) supresión de no-op** (`noop/lockfile_unchanged` sin cambio de lock → sin PR), **(3) dedup por dependencia** (`dedupe.js`, N señales misma dep → 1 versión segura máxima). Paridad playbook mirror+canónico. Smoke real arbolado-app (`semver >=5.0.0` → `already_safe`). Suite **424→439**. Robot re-habilitado | ✅ 2026-05-17 |
-| **✅ HITO OPERATIVO (camino A)** — validado el **catálogo completo de tipos de señal** del pipeline G.5 (C1-C6 clasificación / A1-A6 Aider / O1-O13 override / D1 dedup-hash / L1 sin-señal), cobertura 100 %. 2 gaps de cobertura cerrados TDD: `O5 unparseable_package_json` + `O10 audit_unparseable` (ramas defensivas del override). Suite **439→441**. Smoke E2E fresco (`gh run 27089231233`) → Fix 1 anti-downgrade en vivo (`already_safe`). Hallazgos no bloqueantes: TD-13 (coalesce huérfano diferido), divergencia npm-audit=H.4. **Robot declarado operativo por Daniel → ventana 4 semanas supervisadas (≈2026-07-05).** | ✅ 2026-06-07 |
-| **TD-15 + TD-14 observabilidad (H.4.7)** — la review H.4.7 (2026-07-11) declaró la ventana supervisada **NO superada**: KV vacía con 23 alertas Dependabot open → productor mudo. Diagnóstico 2026-07-12: **el Worker detector NUNCA se desplegó a Cloudflare** (el código de Sem 1 existía; el `wrangler deploy` no se ejecutó jamás — todas las señales históricas fueron seeds manuales). Fixes de esta entrega: **(TD-15)** los overrides se escriben como **rango caret `^X.Y.Z`** (`version.js#toCaretRange`) en vez de pin exacto — el pin del propio robot se pudría (caso real `tmp 0.2.6`, PR #44 + advisory 15-jun); un pin exacto previo se sanea vía `bump_override`. **(TD-14 obs.)** el Worker escribe heartbeat **`last_cycle`** (sin TTL) en cada ciclo — también con kill_switch activo o fetch roto — y `loop.yml` gana step `Check producer heartbeat` que abre UN issue (dedup por título) si falta o supera 3 h. `workers_dev = false` (el cron es la única entrada en prod). Suite runner **→446** (+4 TDD) + worker **9/9** (+3 heartbeat). **PR #10 (mismo día):** la alarma también salta con **heartbeat fresco pero `dependabot_api_error` 401/403** (PAT muerto = ciego con pulso; red/5xx → warning sin issue). | ✅ 2026-07-12 |
-| **🚀 TD-14 CERRADO — Worker detector DESPLEGADO y verificado** — deploy 2026-07-12 (versión `48e12860`, cron `*/30`, `workers_dev=false`; primer heartbeat en vivo desde el tick 18:30 con 401 esperado sin secret). El 13-jul Daniel **regeneró el PAT** `arbolado-maintenance-runner` (el anterior expiraba 2026-08-06) y lo puso en **ambos** secrets (Actions + Worker). **Primer ciclo con token (13-jul 17:00Z): `last_cycle = {alerts_seen: 0, errors: []}`**, contrastado contra GitHub: **0 alertas open** (las 23 de la review H.4.7 quedaron `fixed` tras el merge de PR #56 de arbolado-app) → "0 señales" es por primera vez **calma verificable**, no ceguera. Issue #9 cerrado; la alarma (ausencia/staleness/401/403) queda vigilando. **Ventana H.4.7 aún NO superada**: falta ≥1 ciclo orgánico (llegará con el próximo advisory real). | ✅ 2026-07-13 |
-| **Sem 4 Sesiones D/E** — double-run AST (latente sin playbook critical) + cierre formal | ⏳ tras D |
+| **Sem 4 Sesión A** — alias resolution (TD-7): `runner/alias-resolver/` + step `Resolve model alias`; `AIDER_MODEL` router-driven sin fallback hardcodeado | ✅ 2026-05-14 |
+| **Refactor post-Sesión-A** — `KNOWN_ALIASES` vaciada (Kimi K2 era un modelo real retirado por Groq, no un mote); playbook a `groq/openai/gpt-oss-120b` | ✅ 2026-05-14 |
+| **Sem 4 Sesión F** — validación con dataset real Dependabot: módulo `runner/dependabot/` + 2 CLIs + dry-run batch sobre 59 alertas | ✅ 2026-05-14 |
+| **P1 (TD-11)** — playbook `bump-transitive-via-overrides` (cierra el gap del 70 % transitives), determinista y sin Aider | ✅ 2026-05-15 |
+| **TD-12** — `bump-transitive-via-overrides` cableado en `loop.yml`; ambos extremos validados con npm real (rollback + applied → PR #2) | ✅ 2026-05-15 |
+| **3 fixes dry-run-hardening (G.5)** — anti-downgrade + supresión de no-op + dedup por dependencia. Suite 424→439 | ✅ 2026-05-17 |
+| **✅ HITO OPERATIVO (camino A)** — catálogo completo de tipos de señal (C1-C6 / A1-A6 / O1-O13 / D1 / L1), cobertura 100 %. Declarado operativo por Daniel → ventana de 4 semanas supervisadas | ✅ 2026-06-07 |
+| **TD-15 + TD-14 (observabilidad)** — overrides como rango caret (el pin del propio robot se pudría) + heartbeat `last_cycle` + alarma de productor mudo | ✅ 2026-07-12 |
+| **🚀 TD-14 CERRADO — Worker detector DESPLEGADO** — nunca se había ejecutado el `wrangler deploy`: **todas las señales históricas habían sido seeds manuales**. Desplegado (`48e12860`) + PAT regenerado en sus **dos** destinos | ✅ 2026-07-13 |
+| **TD-16 — H.4.7 desatascado** — el productor escribía `signal_seen:`, que es la marca **del consumidor** ⇒ **cada señal nacía marcada como procesada**. Corregido con dedup propio (`signal_emitted:`, TTL 24 h). Verificado en vivo: `signals_written` 0 → 23, y **los dos primeros PRs orgánicos de su historia** (#93, #94 en `arbolado-app`) | ✅ 2026-08-01 |
+| **Gradado de esos dos PRs** — **rechazados con motivo**: no por incorrectos, sino por **peores que la alternativa**. Sustituidos por 4 `npm update` de los padres → app 12→0, worker 5→0, Dependabot 25→0, **sin un solo override**. De ahí salen **TD-20** y **TD-21** | ✅ 2026-08-01 |
+| **🔭 MODO VIGÍA** — deja de abrir PRs; detecta y avisa por issue. Interruptor `ROBOT_MODE`, corte antes de clasificar, verificado E2E (run `30765236541`) | ✅ 2026-08-02 |
+| **⛔ JUBILACIÓN** — retirado el `schedule` tras 6 días ciego y en verde. La vigilancia se muda a `arbolado-app`. Deudas nuevas **TD-22/23/24** | ✅ 2026-08-16 |
+| **Sem 4 Sesiones D/E** — double-run AST + cierre formal | ⛔ **CANCELADAS.** Nunca hicieron falta: ningún playbook activo declaró `critical: true`. No se harán salvo que se resucite el robot **y** aparezca un playbook crítico |
 
-**Smokes E2E validados:**
+<details>
+<summary>🗄️ Smokes E2E validados en su día (histórico)</summary>
+
 - Sem 2 + Sem 3 happy-path: `gh run 25634323138` (2026-05-10) y `gh run 25639705586` (cron horario activado).
 - Sem 4 B (TD-8 feedback loop): smoke 2026-05-11 con `pr_merged: null→false` propagado vía `repository_dispatch`.
-- Sem 4 C (TD-1 + router): `gh run 25757868927` (2026-05-12). Pipeline corre: `Route models` → classifier (Gemini Flash, `insufficient_data: true → defaults`) → `Check dep precondition (TD-1)` → eslint NO en `package.json` → Aider skipped → report `failure_stage='policy'` con violation `precondition_dep_missing`. PR correctamente NO abierto.
-- **Sem 4 A (TD-7 alias):** `gh run 25865491279` (2026-05-14). Step nuevo `Resolve model alias (TD-7)` consumió `invoker_model=groq/kimi-k2` del router output, lo mapeó a `groq/llama-3.3-70b-versatile` real, y el `Invoke Aider` lo usó como `AIDER_MODEL`. Resto del pipeline igual que Sem 4 C (precondition falla con eslint → Aider skipped). **El `AIDER_MODEL` ya no se hardcodea en el env del job; viene del router 100%.**
-- **Refactor post-Sesión-A:** `gh run 25870531196` (2026-05-14, mismo día). Playbook canónico ahora declara IDs reales de Groq (`groq/openai/gpt-oss-120b` primary). El resolver pasa el ID por `mappedFrom: null` — passthrough verificado contra `/v1/models` sin necesidad de tabla de motes. Output del step: `"resolved": "groq/openai/gpt-oss-120b"`.
-- **Sem 4 Sesión F (validación dataset real):** sin smoke E2E nuevo (la sesión es análisis offline). Pipeline determinista corrió sobre 59 alertas Dependabot del repo `arbolado-app` (open + fixed); 71 % cayó en `precondition_dep_missing` (transitives no presentes en `package.json` direct), 29 % pasaría a Aider pero **el conjunto que pasaría es 1 sola dep** (electron, distintos advisory_ids ya fixed). Hallazgo principal: el bottleneck del flujo Dependabot real NO es la calidad del LLM — es el **scope del único playbook activo** (sólo cubre direct deps con patch). La validación empírica del modelo nuevo (gpt-oss-120b) vs anterior queda diferida hasta volver a tener ≥10 signals open con direct deps procesables. Detalle (deps concretas) NO commiteado por seguridad — vive en `workspace/F5-propuesta-2026-05-14.md` (gitignored).
-- **P1 / TD-11 (2026-05-15):** sin smoke E2E nuevo (offline; playbook aún no cableado en `loop.yml` *en ese momento* — **cerrado el mismo día en TD-12, ver entrada siguiente**). CLI determinista `override-dry-run` corrió el orquestador `runner/overrides/` sobre el mismo dataset histórico de 59 signals → **42 `applied`** (las transitives que eran el 71 % `precondition_fail` con `bump-devdep-cve`, ahora cubiertas vía `package.json#overrides`) + **17 `skipped:not_transitive`** (direct → siguen siendo de `bump-devdep-cve`; coexistencia disjunta confirmada), 0 rolled_back / 0 blocked. Suite runner **363 → 412 pass / 1 skip** (+49 tests TDD `overrides/`).
-- **TD-12 (2026-05-15):** `bump-transitive-via-overrides` **cableado en `loop.yml`** + `report-bridge.js` (+10 tests). **Ambos extremos validados con npm real contra el repo real:** (a) **rollback** `gh run 25928776319` — seed transitive → `npm install` falla → rollback (repo target limpio, sin rama colgada) → issue `parent_strict_range` (#1, cerrado) → `failure_stage=ci` → sin PR; (b) **applied** `gh run 25929991172` — seed idempotente nanoid@3.3.11 → override aplicado → npm install/audit/test/build OK → `failure_stage=none` → **PR `#2` auto:dry-run** (`auto/override-nanoid-*`, diff `"nanoid":"3.3.11"` en overrides + lockfile; cerrado tras verificación). **Regresión Aider** `gh run 25928876870` (cadena Aider entra, PR Aider dispara, override skipped). **Bug del módulo P1 destapado por el smoke real:** `runner/overrides/index.js` corría `npm` en `repoDir` pero arbolado-app no tiene package.json en raíz (vive en `electron-app/`) → `ENOENT` → `applied` inalcanzable; offline no se vio (fixture pkg en raíz). Fix `cwd`=dir del package.json + **2 tests regresión**. **Suite 412 → 424 pass / 1 skip / 0 fail.**
-- **3 fixes dry-run-hardening / G.5 (2026-05-17):** el drenado L1 (59 señales → 36 PRs `auto:dry-run`, **todos rechazados** — la app ya estaba segura `npm audit 0`, eran stale-replay de advisories históricos) destapó 3 fallos bloqueantes del playbook `bump-transitive-via-overrides`; por contrato (HITO FINAL: hallazgo bloqueante → no operativo) el robot se **pausó** y se abordaron TDD: **(1) guardia anti-downgrade** — `runner/overrides/version.js#resolveInstalledVersions` lee las versiones resueltas del lockfile (v1/v2/v3); si TODAS son ≥ `patched_versions` → `skipped/already_safe` (no downgrade, no PR); **(2) supresión de no-op** — tras `npm install`, si el lockfile quedó byte-idéntico → restaurar package.json + `noop/lockfile_unchanged` (sin PR); **(3) dedup por dependencia** — `runner/overrides/dedupe.js#coalesceSignalsByDependency` coalesce N señales de la misma dep a 1 (versión segura máxima, advisory_ids fusionados). Paridad mirror+canónico (cuerpo desde `^id:` byte-idéntico). **Smoke real contra el lockfile de arbolado-app:** advisory stale `semver >=5.0.0` (instancias 6.3.1/7.7.4/5.7.2) → `skipped/already_safe`, sin downgrade ni npm ni PR. **Suite 424 → 439 pass / 1 skip / 0 fail** (+15 tests TDD). Robot re-habilitado tras el smoke.
+- Sem 4 C (TD-1 + router): `gh run 25757868927` (2026-05-12). `Route models` → classifier → `Check dep precondition` → eslint no está en `package.json` → Aider skipped → report `failure_stage='policy'`. PR correctamente NO abierto.
+- Sem 4 A (TD-7 alias): `gh run 25865491279` (2026-05-14). El `AIDER_MODEL` deja de hardcodearse y viene del router al 100 %.
+- Refactor post-Sesión-A: `gh run 25870531196` (2026-05-14). Passthrough del ID real verificado contra `/v1/models`.
+- Sem 4 F: análisis offline sobre 59 alertas reales. **Hallazgo principal: el cuello de botella no era la calidad del LLM, sino el scope del único playbook activo** (solo cubría direct deps con parche).
+- P1/TD-11 (2026-05-15): 42 `applied` + 17 `skipped:not_transitive` sobre el dataset histórico. Suite 363 → 412.
+- TD-12 (2026-05-15): rollback (`25928776319`), applied → PR #2 (`25929991172`), regresión Aider (`25928876870`). Bug de `cwd` destapado por el smoke real (arbolado-app no tiene `package.json` en la raíz, vive en `electron-app/`). Suite 412 → 424.
+- 3 fixes dry-run-hardening (2026-05-17): el drenado L1 (59 señales → 36 PRs, **todos rechazados**) destapó 3 fallos bloqueantes del playbook de overrides. Suite 424 → 439.
+- Modo vigía (2026-08-02): run `30765236541` con `seed_test_signal=true` — gate en success y **skipped** en clasificar, report, commit y **los dos steps de PR**. Aviso creado (issue #22, cerrado luego por ser artefacto del smoke).
+
+</details>
 
 ## Dónde vive el diseño
 
-El diseño completo está en **`druiz07/arbolado-app`** (privado, requiere acceso autenticado para ver):
+El diseño completo está en **`druiz07/arbolado-app`** (privado, requiere acceso autenticado):
 
 - `docs/auto-maintenance/README.md` — orientación general
-- `docs/auto-maintenance/arranque-plan.md` — stack, arquitectura, 9 ajustes críticos, 4 playbooks iniciales
-- `docs/auto-maintenance/signal-schema.md` — contrato JSON Worker → KV (con campo `dependency_type` clave)
-- `docs/auto-maintenance/policy-engine-spec.md` — AST validator de `package.json`, 5 funciones + tests obligatorios
-- `docs/auto-maintenance/playbooks/bump-devdep-cve.yaml` — playbook canónico (con 6 ajustes finos integrados)
+- `docs/auto-maintenance/arranque-plan.md` — stack, arquitectura, **banner de jubilación y tabla de tech debt con disparadores** (TD-18/20/21/22/23/24)
+- `docs/auto-maintenance/RUNBOOK.md` — **manual operativo en lenguaje llano**; su §0 explica cómo funciona la vigilancia hoy
+- `docs/auto-maintenance/signal-schema.md` — contrato JSON Worker → KV
+- `docs/auto-maintenance/policy-engine-spec.md` — AST validator de `package.json`
+- `docs/auto-maintenance/playbooks/bump-devdep-cve.yaml` — playbook canónico
 
-## Estructura actual (post-Sem-4-C)
+## Estructura
 
 ```
 .
-├── .env.example                       # variables (alineadas con secrets de GH Actions)
+├── .env.example                       # variables (alineadas con los secrets de GH Actions)
 ├── README.md                          # este archivo
 ├── LICENSE                            # MIT
-├── .gitignore                         # Node defaults
 ├── .github/workflows/
-│   ├── loop.yml                       # cron orchestrator
-│   │                                  #   - test-runner (cron + push)
-│   │                                  #   - test-worker
-│   │                                  #   - observe-signals (cron + push, KV listing)
-│   │                                  #   - apply-playbooks (cron */30 desde 2026-05-16, horario Sem 3→2026-05-16;
-│   │                                  #     pipeline: load-signal → route-models (Sem 4 C) →
-│   │                                  #     classify (router-driven model) → load-playbook →
-│   │                                  #     snapshot-before → check-dep-precondition (Sem 4 C, TD-1) →
-│   │                                  #     invoke-aider (router-driven prompt variant) →
-│   │                                  #     snapshot-after → policy → enforce-max-diff →
-│   │                                  #     ci-tests → ci-build → write-report → commit-report →
-│   │                                  #     open-pr → mark-signal-seen)
-│   └── pr-merged-listener.yml         # ✅ Sem 4 B (TD-8): consume repository_dispatch desde
-│                                      #   arbolado-app y actualiza pr_merged del session report
+│   ├── loop.yml                       # ⛔ SIN CRON desde 2026-08-16 — solo workflow_dispatch
+│   │                                  #   jobs: test-runner · test-worker · observe-signals · apply-playbooks
+│   │                                  #   pipeline: load-signal → watch-gate → route-models → classify →
+│   │                                  #     load-playbook → precondition → aider|override → policy →
+│   │                                  #     enforce-max-diff → ci-tests → ci-build → write-report →
+│   │                                  #     commit-report → open-pr → mark-signal-seen
+│   └── pr-merged-listener.yml         # 🟡 dormido: consume repository_dispatch de arbolado-app,
+│                                      #   que solo se emite para PRs auto:dry-run (ya no habrá)
 ├── cloudflare/
-│   ├── NOTES.md                       # KV namespace ID + schema + wrangler.toml template
-│   └── worker/                        # ✅ Sem 1 + heartbeat TD-14 + dedup TD-16 — 12/12 tests
-│       ├── wrangler.toml              # cron */30 + KV binding STATE + workers_dev=false
-│       ├── package.json               # zod + wrangler + types
-│       ├── tsconfig.json              # strict + workers-types + node
+│   ├── NOTES.md                       # KV namespace ID + schema + plantilla de wrangler.toml
+│   └── worker/                        # 🟠 desplegado y con cron, pero nadie consume lo que escribe
+│       ├── wrangler.toml              # cron */30 + binding KV STATE + workers_dev=false
 │       ├── src/{worker,signal-schema,dependabot,normalize}.ts
-│       └── test/{normalize,worker}.test.ts
-├── runner/                            # ✅ post-TD-15 — 446 pass / 1 skip / 0 fail
-│   ├── package.json                   # node 20 + semver + js-yaml
-│   ├── README.md
-│   ├── fixtures/sample-signal.json    # fixture canónica para smoke real
-│   ├── policy-engine/                 # ✅ Sem 1 (70 tests)
-│   ├── playbook-loader/               # ✅ Sem 2 parcial 1 (45 tests)
-│   ├── aider-invoker/                 # ✅ Sem 2 parcial 2 (38 mocks + smoke gated)
-│   ├── session-report/                # ✅ Sem 2 parcial 3 (71 tests)
-│   ├── classifier/                    # ✅ Sem 3 (31 tests + 2 nuevos Sem 4 C model param)
-│   │   ├── {errors,prompt,client,parser,threshold,index}.js
-│   │   └── *.test.js                  # callGeminiFlash y classifySignal aceptan `model` (Sem 4 C)
-│   ├── signal-loader/                 # ✅ Sem 3 (16 tests)
-│   ├── update-merge/                  # ✅ Sem 4 B (5 tests, TD-8)
-│   │   └── {index,index.test}.js      # findReportBySignalHash + updateReportPrMerged
-│   ├── preconditions/                 # ✅ Sem 4 C (9 tests, TD-1 mitigation)
-│   │   └── dep-exists.{js,test.js}    # checkDepExists determinístico pre-Aider
-│   ├── health-scorer/                 # ✅ Sem 4 C (7 tests)
-│   │   └── index.{js,test.js}         # ventana móvil 14d + per-playbook breakdown
-│   ├── router/                        # ✅ Sem 4 C (7 tests)
-│   │   └── index.{js,test.js}         # routeClassifierModel + routeInvokerModel
-│   └── scripts/cli/                   # thin orchestrators consumidos por loop.yml
-│       ├── load-playbook.mjs
-│       ├── policy-validate.mjs
-│       ├── enforce-max-diff.mjs
-│       ├── build-and-write-report.mjs
-│       ├── load-next-signal.mjs       # ✅ Sem 3 (KV REST + dedup)
-│       ├── classify-signal.mjs        # ✅ Sem 3 (acepta --model <id> desde Sem 4 C)
-│       ├── mark-signal-seen.mjs       # ✅ Sem 3 (KV PUT TTL 30d)
-│       ├── update-session-report-on-merge.mjs  # ✅ Sem 4 B (TD-8)
-│       ├── check-dep-exists.mjs       # ✅ Sem 4 C (TD-1: precondition + policy.json sintético)
-│       └── route-models.mjs           # ✅ Sem 4 C (lee reports → health → routing JSON)
+│       └── test/{normalize,worker}.test.ts        # 12/12
+├── runner/                            # 446 pass / 1 skip / 0 fail (447 tests, 74 suites)
+│   ├── policy-engine/                 # validación AST de package.json, sin LLM
+│   ├── playbook-loader/  aider-invoker/  session-report/
+│   ├── classifier/                    # Gemini Flash + top-2 margin
+│   ├── signal-loader/                 # KV REST + dedup  ← donde saltó el 401 de agosto
+│   ├── overrides/                     # transitives vía package.json#overrides, determinista
+│   ├── update-merge/  preconditions/  health-scorer/  router/  alias-resolver/  dependabot/
+│   └── scripts/cli/                   # orquestadores finos consumidos por loop.yml
 └── docs/auto-maintenance/
-    ├── playbooks/                     # mirror del canónico
-    │   ├── README.md
-    │   ├── bump-devdep-cve.yaml       # ✅ TD-10 cerrado 2026-05-16: hash idéntico al
-    │   │                              #   canónico (resincronizado); load-bearing
-    │   ├── bump-transitive-via-overrides.yaml # ✅ P1 2026-05-15 (TD-11): transitives vía
-    │   │                              #   package.json#overrides, sin Aider; CABLEADO (TD-12 ✅);
-    │   │                              #   3 fixes dry-run-hardening G.5 2026-05-17 (anti-downgrade/no-op/dedup)
+    ├── playbooks/                     # mirror del canónico (load-bearing en runtime)
+    │   ├── bump-devdep-cve.yaml
+    │   ├── bump-transitive-via-overrides.yaml
     │   ├── fix-tests-minor-version-bump.yaml
-    │   ├── rollback-on-build-failure.yaml     # critical: true (documental, no activo)
+    │   ├── rollback-on-build-failure.yaml     # critical: true (documental, nunca activo)
     │   └── lint-prettier-autofix.yaml
-    └── session-reports/               # ✅ alimentado por el bot + actualizado por el listener
-        └── <YYYY-MM-DD>/<playbook-id>-<short-hash-12>.json
+    └── session-reports/               # <YYYY-MM-DD>/<playbook-id>-<short-hash-12>.json
 ```
 
 ## Cómo correr los tests en local
+
+Siguen pasando y siguen siendo útiles como documentación ejecutable del pipeline.
 
 ```powershell
 # Runner completo (todos los módulos)
 cd runner
 npm install
 npm test
-# ✔ 328 pass, 0 fail, 1 skip (~2.2 s)
+# ✔ 447 tests: 446 pass, 0 fail, 1 skip — 74 suites (~2,2 s)
 
-# Smoke real opcional del aider-invoker (consume Groq tokens reales, ~6 s, ~$0.0015)
-$env:AIDER_SMOKE = "1"
-$env:GROQ_API_KEY = "<tu key>"
-npm test
+# Smoke real opcional del aider-invoker (consume tokens reales de Groq, ~6 s)
+$env:AIDER_SMOKE = "1"; $env:GROQ_API_KEY = "<tu key>"; npm test
 
 # Smoke real opcional del classifier (Gemini Flash real)
-$env:CLASSIFIER_SMOKE = "1"
-$env:GEMINI_API_KEY = "<tu key>"
-npm test
+$env:CLASSIFIER_SMOKE = "1"; $env:GEMINI_API_KEY = "<tu key>"; npm test
 
 # Worker detector (TypeScript)
 cd ../cloudflare/worker
 npm install
 npm run typecheck
 npm test
-# ✔ 6 tests, 0 fail (~300 ms)
+# ✔ 12 tests, 0 fail (~430 ms)
 ```
 
-## Cómo disparar el smoke de `apply-playbooks` en CI
+> ⚠️ **Sin cron, estos tests ya no se ejecutan solos en CI.** Corren dentro de `maintenance-loop`, así que solo se disparan con `workflow_dispatch` o corriéndolos en local.
+
+## Cómo lanzarlo a mano (si alguna vez hace falta)
+
+> 🔴 **Hoy esto NO funciona tal cual:** los pasos que tocan la KV fallarán con **401** hasta que se regenere `CLOUDFLARE_API_TOKEN`. Y aunque se regenere, con `ROBOT_MODE` distinto de `auto` el pipeline se corta en el watch-gate: detecta, avisa por issue y no abre PR.
 
 ```powershell
-# Manual, desde local. Requiere los 4 secrets vivos en el repo.
-# El flag seed_test_signal=true siembra signal:sem3-smoke-task12 en KV
-# Y borra el signal_seen:<hash> previo (sin esto el dedup hace skip).
-gh workflow run maintenance-loop --repo druiz07/arbolado-maintenance -f seed_test_signal=true
+# Lanzar el loop una vez
+gh workflow run maintenance-loop --repo druiz07/arbolado-maintenance
 gh run watch <run-id> --repo druiz07/arbolado-maintenance --exit-status
 
-# L1 aceleración: replay del backlog real de Dependabot en dry-run.
-# Regenera TODAS las alertas de arbolado-app y las siembra en KV; el cron
-# las drena 1/run → muchos PRs auto:dry-run reales para gradar merge_rate.
-# Requiere que GH_PAT_ARBOLADO_APP tenga permiso Dependabot alerts: Read.
-gh workflow run maintenance-loop --repo druiz07/arbolado-maintenance -f seed_dependabot_backlog=true
+# Sembrar una señal de prueba en KV (el flag borra su signal_seen: previo,
+# sin eso el dedup la salta)
+gh workflow run maintenance-loop --repo druiz07/arbolado-maintenance -f seed_test_signal=true
 ```
 
-> **⚠ Estado operativo (puede ser transitorio):** durante un drenado de backlog
-> L1 el cron puede estar **temporalmente en `*/10`** en vez de `*/30`; al
-> terminar el drenado se revierte a `*/30` (cadencia real de producción).
-> **Prioridad mientras dure:** al empezar cualquier sesión, revisar y gradar
-> primero los PRs `auto:dry-run` abiertos en arbolado-app
-> (`gh pr list -R druiz07/arbolado-app --label auto:dry-run`). Estado vivo
-> exacto: ver `docs/auto-maintenance/arranque-plan.md` (HITO FINAL) en
-> arbolado-proyecto.
-
-El job `apply-playbooks` corre en cron `*/30` (cada 30 min) desde 2026-05-16 (antes horario desde 2026-05-10; L2 aceleración, alineado con el Worker `*/30`). Cada ejecución:
-1. lee KV (`signal:*`), salta los ya marcados (`signal_seen:<hash>`),
-1-bis. 🔭 **watch-gate** (`ROBOT_MODE`): si no es `auto`, **abre el aviso, marca la señal vista y para aquí** — los pasos 2-9 quedan en `skipped`,
-2. **route-models** (Sem 4 C) lee health metrics + decide modelo+promptVariant,
-3. classifier (Gemini Flash o Pro según router) elige playbook con top-2 margin ≥ 0.15,
-4. **check-dep-precondition** (Sem 4 C, TD-1) bloquea si la dep no existe en `package.json`,
-5. **resolve-model** (Sem 4 A, TD-7) toma el `invoker_model` del router output (alias informal `groq/kimi-k2`) y lo resuelve a un model id real consultando `/v1/models` de Groq/Gemini → emite `AIDER_MODEL` para `Invoke Aider`,
-6. Aider hace el bump usando ese model id real,
-7. policy AST + enforce-max-diff + CI tests/build + write report,
-8. abre PR `auto:dry-run` sólo si `failure_stage='none'`,
-9. marca signal como visto con TTL 30d.
-
-## Pendiente — Sem 4 Sesión D (latente)
-
-> **Plan detallado:** `arbolado-app:docs/superpowers/plans/2026-05-11-g5-sem4-router-llm.md` Tasks 13-15 (Sesión D). ~2.5 h.
-
-Implementar modo double-run AST equivalence en `runner/ast-equivalence/`: para playbooks `constraints.critical: true` (el primer candidato sería `rollback-on-build-failure.yaml`), correr Aider 2× con seeds distintas, comparar diffs por AST. Si difieren, abortar. **Latente** porque ningún playbook activo declara `critical: true` aún — diferido a H.1/H.4 cuando el primer playbook crítico lo demande.
-
-```
-runner/ast-equivalence/                # compareJsonAst + tests
-runner/scripts/cli/double-run-aider.mjs
-.github/workflows/loop.yml             # branching: si playbook critical → double-run-aider.mjs
-```
-
-Tras Sesión D, **Sesión E** (~30 min) hace el cierre formal: consolida bloque Sem 4 en `arranque-plan.md`, marca TD-7/TD-1/TD-8 ya cerrados en tabla y deja la fase G.5 lista para pasar a H.4.
+**Al leer un run, `--json jobs`, nunca `--log`:** `gh run view --log` devuelve el **texto del script**, no su salida, y ya ha provocado dos diagnósticos falsos. Y un step en `success` seguido de todo `skipped` significa que **el gate de arriba no pasó**, no que no hubiera trabajo.
 
 ## Desarrollo local
 
 ```powershell
 copy .env.example .env
-# rellena los valores — IDs públicos están en cloudflare/NOTES.md
-# para los secrets, usa los mismos valores que en `gh secret list --repo druiz07/arbolado-maintenance`
+# rellena los valores — los IDs públicos están en cloudflare/NOTES.md
+# para los secrets, los mismos nombres que en `gh secret list --repo druiz07/arbolado-maintenance`
 ```
 
-`.env` ya está cubierto por `.gitignore`. Nunca commitearlo.
+`.env` está cubierto por `.gitignore`. Nunca commitearlo.
 
 ## Configuración
 
-Las variables de entorno necesarias (nombres canónicos) están en [`.env.example`](./.env.example). Para desarrollo local, copia a `.env` y rellena valores. Para CI, los mismos nombres están provisionados como secrets del repo (gestión privada del mantenedor).
+Los nombres canónicos de las variables están en [`.env.example`](./.env.example). En CI están provisionados como secrets del repo (gestión privada del mantenedor). **Ninguno se consume hoy**: ver la tabla *"Estado actual de cada pieza"*.
 
 ## Licencia
 
