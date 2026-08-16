@@ -2,6 +2,26 @@
 
 > Runner del **loop de mantenimiento autónomo** para [`druiz07/arbolado-app`](https://github.com/druiz07/arbolado-app) (privado). Este repo es **público** para que GitHub Actions corra con minutos ilimitados — pero contiene **cero código fuente del producto**, solo orquestación: workflows, scripts e infra notes.
 
+> ## ⛔ ESTADO 2026-08-16 — EL ROBOT ESTÁ JUBILADO. La vigilancia vive ahora en `arbolado-app`.
+>
+> **El `schedule` de `maintenance-loop` se ha retirado.** El repositorio se conserva entero —playbooks, classifier, router, policy engine, runner y sus tests— como **archivo**, y el workflow sigue lanzable a mano (`workflow_dispatch`).
+>
+> **Por qué.** Dos números y una avería:
+>
+> - **42 PRs en toda su vida: 41 cerrados, 1 mergeado.** El 1-ago las 25 alertas abiertas se cerraron con **4 `npm update` de los padres y ningún override**, justo lo contrario de lo que él habría propuesto (~9 PRs de overrides). Ese día pasó a modo vigía.
+> - **Del 10 al 16 de agosto estuvo ciego y en verde.** Caducó el token de API de Cloudflare; el loader reventaba con `SignalLoaderKvError: KV listKeys 401`, pero `continue-on-error: true` lo marcaba verde, el gate se saltaba por condición, el snapshot decía *"Signals encontradas: 0"* y **la alarma TD-14 no disparó** porque un 401 cae en la rama *"transitorio, sin issue"*. Mientras tanto entró `js-yaml` (**alta, runtime**, 11-ago), que viajaba dentro del `.exe`, y nadie se enteró en 6 días.
+>
+> **Cuarto fallo de su historia, y los cuatro —TD-14, TD-16, TD-17 y este— en la misma fontanería: Worker + KV + token.** Un vigía cuyo modo de fallo es callarse y ponerse verde es peor que no tener vigía, porque se confía en su silencio.
+>
+> **Dónde mirar ahora:** `druiz07/arbolado-app` → `.github/workflows/vigia-vulnerabilidades.yml` y `scripts/vigia-vulnerabilidades.mjs`. Hace `npm audit` sobre el propio repositorio, **sin ninguna credencial**, distingue de verdad lo que llega al usuario de lo que no (TD-18/TD-21) y **se pone rojo** tanto si algo que se distribuye está afectado como si no puede auditar. Ejecutable a mano: `node scripts/vigia-vulnerabilidades.mjs --dry-run`.
+>
+> **Efecto colateral bueno:** al parar el loop, los PAT que vencían en octubre (`arbolado-maintenance-runner` 11-oct, `arbolado-app-dispatch-to-maintenance` 30-oct) **dejan de importar**. No hay nada que renovar.
+>
+> **Para resucitarlo** hacen falta tres cosas, no una: (1) regenerar `CLOUDFLARE_API_TOKEN`, (2) devolver el `schedule` en `loop.yml`, (3) `gh variable set ROBOT_MODE --body auto`. Y antes, tapar los tres disfraces que lo dejaron mentir en verde (el `continue-on-error` del loader, el 401 tratado como transitorio, y `wrangler@latest` sin fijar) y cerrar TD-18/TD-20/TD-21.
+
+<details>
+<summary>🗄️ Histórico anterior (contexto, ya superado por lo de arriba)</summary>
+
 > ## ✅ ESTADO 2026-08-01 — EL ROBOT YA ENTREGA (ventana supervisada por fin en marcha)
 >
 > **TD-16 cerrado: el productor marcaba como "ya procesada" cada señal que emitía.** `cloudflare/worker/src/worker.ts` escribía `signal:<hash>` **y `signal_seen:<hash>` en el mismo instante**, pero `signal_seen:` es la marca **del runner** (`runner/signal-loader/dedup.js`, TTL 30 d, *"ya la procesé"*) ⇒ `loadNextSignal` saltaba **todas** las señales y el pipeline salía entero `skipped`, en verde, con 25 alertas Dependabot abiertas.
@@ -88,9 +108,13 @@
 >
 > </details>
 
+</details>
+
 ## Qué hace este repo
 
-Periódicamente (cron) ejecuta este pipeline:
+> ⛔ **Ya no lo hace por su cuenta**: el `schedule` se retiró el 2026-08-16 y esto queda como descripción de la maquinaria archivada. Solo corre si se lanza a mano.
+
+Periódicamente (cron) ejecutaba este pipeline:
 
 ```
 Worker (detector, en Cloudflare)
