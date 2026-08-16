@@ -28,7 +28,7 @@
 >
 > **Tres cosas, no una:**
 >
-> 1. Regenerar **`CLOUDFLARE_API_TOKEN`** (el actual está muerto desde el 10-ago) y ponerlo como secret del repo.
+> 1. **Rehacer la infraestructura de Cloudflare, que ya no existe** (borrada el 2026-08-16): crear un KV namespace nuevo, poner su ID en `cloudflare/worker/wrangler.toml` **y en los 10 sitios donde `loop.yml` lo tiene escrito a mano**, más `cloudflare/NOTES.md` (3 veces), `wrangler deploy` del Worker, y regenerar **`CLOUDFLARE_API_TOKEN`** (el anterior caducó el 7-ago) como secret del repo. También hay que volver a poner `GH_PAT_ARBOLADO_APP` como secret del Worker (`wrangler secret put`).
 > 2. Descomentar el `schedule` en [`.github/workflows/loop.yml`](.github/workflows/loop.yml) (queda escrito tal cual estaba).
 > 3. `gh variable set ROBOT_MODE --body auto --repo druiz07/arbolado-maintenance`.
 >
@@ -40,9 +40,9 @@
 |---|---|---|
 | **`maintenance-loop`** (workflow) | 🟡 **Sin cron.** Solo `workflow_dispatch` | No corre solo. Ojo: al no haber cron, **los tests del runner y del Worker solo se ejecutan si lo lanzas a mano** |
 | **`pr-merged-listener`** (workflow) | 🟡 **Dormido.** Sigue activo pero nunca se dispara | Escucha `repository_dispatch` desde `arbolado-app`, que solo lo emite para PRs con label `auto:dry-run`. Como el robot ya no abre PRs, **no llegará ninguno** |
-| **Worker `arbolado-maintenance-detector`** (Cloudflare) | 🟠 **Sigue desplegado y con su cron `*/30`** | Escribe señales en la KV **que ya no lee nadie**. No hace daño y no cuesta dinero (free tier), pero es basura: conviene **borrarlo desde el panel de Cloudflare** |
-| **KV namespace `212fe2e1…`** | 🟠 Vivo, con señales que expiran solas (TTL 24 h) y `last_cycle` sin TTL | Se puede borrar junto con el Worker |
-| **`CLOUDFLARE_API_TOKEN`** (secret) | 🔴 **MUERTO** — devuelve 401 desde el 10-ago | Es lo que dejó ciego al robot. **Hay que regenerarlo si se resucita**; hoy no hace falta para nada |
+| **Worker `arbolado-maintenance-detector`** (Cloudflare) | ✅ **BORRADO el 2026-08-16** | Ya no existe ni corre su cron. Resucitar el robot exige volver a desplegarlo |
+| **KV namespace `212fe2e1…`** | ✅ **BORRADO el 2026-08-16** | Con él se fueron las señales y el heartbeat. Un namespace nuevo tendrá **otro ID**, que hay que propagar a `wrangler.toml` y a `loop.yml` |
+| **`CLOUDFLARE_API_TOKEN`** (secret) | 🔴 **Caducado el 2026-08-07** — así lo predecía `incident-response.md` §5, y nadie lo rotó | Es lo que dejó ciego al robot. Hoy no hace falta para nada; el secret sigue en el repo, inerte |
 | **`GH_PAT_ARBOLADO_APP`** (secret del repo **y** del Worker) | 🟡 Vivo, caduca **11-oct-2026** | **Ya no importa**: nada lo usa. No hay que renovarlo |
 | **`MAINTENANCE_REPO_DISPATCH_TOKEN`** (en `arbolado-app`) | 🟡 Vivo, caduca **30-oct-2026** | **Ya no importa** por lo mismo |
 | **`GEMINI_API_KEY` / `GROQ_API_KEY`** (secrets) | 🟡 Vivos, sin uso | El pipeline que los consumía no corre. Cero gasto |
