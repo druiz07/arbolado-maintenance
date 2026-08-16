@@ -11,26 +11,56 @@
 #   - abre PR en arbolado-app con label auto:dry-run,
 #   - escribe session-report JSON commit en este repo.
 #
-# 🔭 MODO VIGÍA (activo desde 2026-08-02, decisión de Daniel del 1-ago).
-#   Variable de repo `ROBOT_MODE`:
-#     auto            → pipeline completo, abre PR auto:dry-run.
-#     watch / ausente → detecta y AVISA (issue deduplicado), NO abre PR.
-#   El default sin variable es vigía a propósito (fail-safe). El corte está en
-#   el step `Watch mode gate (ROBOT_MODE)`, justo después de cargar la señal.
-#   Se conservan detector, heartbeat y alarma TD-14 — por eso NO se deshabilita
-#   el workflow. Reactivar en el piloto:
-#     gh variable set ROBOT_MODE --body auto --repo druiz07/arbolado-maintenance
+# ⛔ JUBILADO EL 2026-08-16 — este loop YA NO CORRE SOLO. Decisión de Daniel.
+#
+#   Historia corta: 42 PRs en toda su vida, 41 cerrados y 1 mergeado. El 1-ago
+#   las 25 alertas abiertas se cerraron con 4 `npm update` de los padres, sin un
+#   solo override — justo lo contrario de lo que él habría propuesto. Ese día
+#   pasó a modo vigía (detectar y avisar, sin abrir PRs).
+#
+#   Lo que cerró el caso: del 10 al 16 de agosto estuvo CIEGO Y EN VERDE. Caducó
+#   el token de API de Cloudflare y el loader empezó a reventar con
+#   `KV listKeys 401`, pero `continue-on-error: true` lo marcaba verde, el gate
+#   se saltaba por condición, el snapshot decía "Signals encontradas: 0" y la
+#   alarma TD-14 no disparó porque un 401 cae en la rama "transitorio, sin
+#   issue". Mientras tanto entró una vulnerabilidad ALTA de runtime (js-yaml,
+#   11-ago) que viajaba dentro del .exe y de la que nadie se enteró en 6 días.
+#   Cuarto fallo de su historia, y los cuatro (TD-14, TD-16, TD-17 y este) en la
+#   misma fontanería: Worker + KV + token.
+#
+#   Dónde vive ahora la vigilancia: en `arbolado-app`, workflow
+#   `vigia-vulnerabilidades.yml` + `scripts/vigia-vulnerabilidades.mjs`. Hace
+#   `npm audit` sobre el propio repositorio, SIN NINGUNA CREDENCIAL, distingue
+#   de verdad producción de desarrollo (TD-18/TD-21) y se pone ROJO tanto si
+#   algo que se distribuye está afectado como si no puede auditar.
+#
+#   Qué queda aquí y por qué: el pipeline entero (playbooks, classifier, router,
+#   policy engine, runner y sus tests) se conserva INTACTO como archivo por si
+#   el piloto pide volver a la apertura automática de PRs. Solo se ha quitado el
+#   `schedule`: se puede lanzar a mano con `workflow_dispatch`.
+#
+#   Para resucitarlo hacen falta TRES cosas, no una:
+#     1. regenerar el token de API de Cloudflare (`CLOUDFLARE_API_TOKEN`) — el
+#        actual está muerto desde el 10-ago;
+#     2. devolver el `schedule` de abajo;
+#     3. `gh variable set ROBOT_MODE --body auto --repo druiz07/arbolado-maintenance`.
+#   Y antes de eso, arreglar los tres disfraces que lo dejaron mentir en verde:
+#   el `continue-on-error` del loader, el 401 tratado como transitorio en la
+#   alarma TD-14, y `wrangler@latest` sin fijar (rompió el run del 11-ago con un
+#   ETARGET de una release rota aguas arriba).
+#
+#   Riesgos que seguían abiertos y que hay que resolver ANTES de reactivar:
+#   TD-18 (los overrides de npm son globales), TD-20 (mirar si el padre ya lo
+#   resuelve por su caret) y TD-21 (comprobar el manifiesto de la señal).
 
 name: maintenance-loop
 
 on:
-  schedule:
-    # Cadencia real de producción: cada 30 min, alineada con el Worker
-    # productor (wrangler.toml */30). `concurrency` (abajo) encola runs
-    # solapados (no se pierde señal). El */10 temporal del 2026-05-16 para
-    # drenar el backlog L1 (59 señales → 30 PRs auto:dry-run, 0 issues) se
-    # revirtió aquí el 2026-05-17 tras drenado verificado (2x classify=skipped).
-    - cron: '*/30 * * * *'
+  # ⛔ Cadencia retirada el 2026-08-16 (ver banner de arriba). Era `*/30 * * * *`,
+  # alineada con el Worker productor. Se conserva escrita para poder devolverla
+  # de un solo cambio si el piloto lo pide.
+  # schedule:
+  #   - cron: '*/30 * * * *'
   workflow_dispatch:
     inputs:
       seed_test_signal:
